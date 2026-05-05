@@ -442,6 +442,22 @@ client.on('messageCreate', async (message) => {
         return message.reply(`⭐ 顔パスリスト\n${mentions}`);
     }
 
+    // ヘルプコマンド（管理者のみ）
+    if (message.content.trim() === '!help') {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        return message.reply(new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('📖 コマンド一覧')
+            .addFields(
+                { name: '`!reauth @ユーザー`', value: '手動で再認証を開始する' },
+                { name: '`!vip add @ユーザー`', value: '顔パスリストに追加＋認証ロール付与' },
+                { name: '`!vip remove @ユーザー`', value: '顔パスリストから削除' },
+                { name: '`!vip list`', value: '顔パスリストを表示' },
+                { name: '`!help`', value: 'このヘルプを表示' },
+            )
+        );
+    }
+
     // 認証メッセージ判定
     const session = sessions.get(message.author.id);
     if (!session || session.step !== 2) return;
