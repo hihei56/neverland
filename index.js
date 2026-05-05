@@ -424,28 +424,30 @@ client.on('messageCreate', async (message) => {
             return message.reply(`⭐ 顔パスリスト\n${mentions}`);
         }
 
-        // メンションまたはIDからメンバー取得
+        // メンションまたはIDからメンバー取得（サーバー外ユーザーも許容）
         const targetId = message.mentions.members?.first()?.id ?? args[2]?.replace(/\D/g, '');
         if (!targetId) {
             return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
         }
         const target = message.guild.members.cache.get(targetId)
             ?? await message.guild.members.fetch(targetId).catch(() => null);
-        if (!target) return message.reply('ユーザーが見つからなかったよ');
 
         if (sub === 'add') {
-            if (!whitelist.includes(target.id)) {
-                whitelist.push(target.id);
+            if (!whitelist.includes(targetId)) {
+                whitelist.push(targetId);
                 saveWhitelist(whitelist);
             }
-            await target.roles.add(CONFIG.VIP_ROLE_ID).catch(() => {});
-            return message.reply(`${target} を顔パスリストに追加したよ ⭐`);
+            if (target) {
+                await target.roles.add(CONFIG.VIP_ROLE_ID).catch(() => {});
+                return message.reply(`${target} を顔パスリストに追加したよ ⭐`);
+            }
+            return message.reply(`ID \`${targetId}\` を顔パスリストに追加したよ ⭐（次回入室時にVIPロール付与）`);
         }
 
         if (sub === 'remove') {
-            whitelist = whitelist.filter(id => id !== target.id);
+            whitelist = whitelist.filter(id => id !== targetId);
             saveWhitelist(whitelist);
-            return message.reply(`${target} を顔パスリストから外したよ`);
+            return message.reply(target ? `${target} を顔パスリストから外したよ` : `ID \`${targetId}\` を顔パスリストから外したよ`);
         }
 
         return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');

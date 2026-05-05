@@ -1,14 +1,12 @@
 // moderator.js
 const axios  = require('axios');
-const { OpenAI } = require('openai');
 const { ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { getModExcludeList } = require('./exclude_manager');
 const whStore = require('./webhook_store');
 const { isCursed } = require('./curse_manager');
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-
 const VIP_ROLE_ID = process.env.VIP_ROLE_ID;
+if (!VIP_ROLE_ID) console.warn('[MOD] VIP_ROLE_ID が .env に設定されていません。moderator は動作しません。');
 
 const EXEMPT_ROLES = [
     '1486178659130933278',
@@ -261,34 +259,6 @@ async function downloadFiles(attachments) {
     return files;
 }
 
-const AI_THRESHOLDS = {
-    'sexual/minors':           0.20,
-    'hate':                    0.60,
-    'hate/threatening':        0.55,
-    'harassment':              0.80,
-    'harassment/threatening':  0.70,
-    'self-harm':               0.70,
-    'self-harm/intent':        0.55,
-    'self-harm/instructions':  0.45,
-    'sexual':                  0.90,
-    'violence':                0.88,
-    'violence/graphic':        0.80,
-};
-
-async function checkAiModeration(text) {
-    if (!text?.trim() || !process.env.OPENAI_API_KEY) return { flagged: false, reason: null };
-    try {
-        const result = await openai.moderations.create({ model: 'omni-moderation-latest', input: text });
-        const scores = result.results[0]?.category_scores ?? {};
-        for (const [cat, threshold] of Object.entries(AI_THRESHOLDS)) {
-            if ((scores[cat] ?? 0) > threshold) return { flagged: true, reason: cat };
-        }
-        return { flagged: false, reason: null };
-    } catch (e) {
-        console.error('[AI Mod] API失敗:', e.message);
-        return { flagged: false, reason: null };
-    }
-}
 
 function logDeletion({ message, matched }) {
     const ts      = new Date().toISOString();
@@ -573,13 +543,8 @@ async function handleModerator(message) {
     const normalized       = normalizeForDetection(strippedContent);
     const { hit, matched } = checkNgWords(normalized);
 
-    const aiResult = strippedContent.trim() && !isExempt && !hit
-        ? await checkAiModeration(strippedContent)
-        : { flagged: false, reason: null };
-
-    if ((hit || aiResult.flagged) && !isExempt) {
-        const allMatched = aiResult.reason ? [...matched, aiResult.reason] : matched;
-        logDeletion({ message, matched: allMatched });
+    if (hit && !isExempt) {
+        logDeletion({ message, matched });
         await instantDeleteAndRecode(message);
         return;
     }
