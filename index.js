@@ -119,6 +119,7 @@ function saveWhitelist(list) {
 
 let whitelist = loadWhitelist();
 const sessions = new Map();
+let authPaused = false;
 
 // ログ送信
 async function sendLog(guild, embed) {
@@ -348,6 +349,12 @@ client.on('guildMemberAdd', async (member) => {
         return;
     }
 
+    if (authPaused) {
+        await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
+        console.log(`[AUTH PAUSE] ${member.user.tag}(${member.id}) 認証スキップで入国`);
+        return;
+    }
+
     await startAuth(member);
 });
 
@@ -453,6 +460,24 @@ client.on('messageCreate', async (message) => {
         return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
     }
 
+    // 入国審査一時停止コマンド（管理者のみ）
+    if (message.content.trim() === '!auth pause') {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        authPaused = true;
+        return message.reply('⏸️ 入国審査を一時停止したよ。この間に入国したユーザーは認証なしで入れるよ。解除は `!auth resume`');
+    }
+
+    if (message.content.trim() === '!auth resume') {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        authPaused = false;
+        return message.reply('▶️ 入国審査を再開したよ。');
+    }
+
+    if (message.content.trim() === '!auth status') {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        return message.reply(authPaused ? '⏸️ 入国審査は現在**一時停止中**だよ。' : '▶️ 入国審査は現在**稼働中**だよ。');
+    }
+
     // ヘルプコマンド（管理者のみ）
     if (message.content.trim() === '!help') {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
@@ -464,6 +489,9 @@ client.on('messageCreate', async (message) => {
                 { name: '`!vip add @ユーザー`', value: '顔パスリストに追加＋認証ロール付与' },
                 { name: '`!vip remove @ユーザー`', value: '顔パスリストから削除' },
                 { name: '`!vip list`', value: '顔パスリストを表示' },
+                { name: '`!auth pause`', value: '入国審査を一時停止（この間の入国者は認証不要）' },
+                { name: '`!auth resume`', value: '入国審査を再開' },
+                { name: '`!auth status`', value: '入国審査の現在の状態を確認' },
                 { name: '`!help`', value: 'このヘルプを表示' },
             )] });
     }
