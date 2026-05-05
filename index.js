@@ -12,9 +12,17 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
+    AttachmentBuilder,
 } = require('discord.js');
 const fs = require('fs');
+const path = require('path');
 const { DATA_DIR, WHITELIST } = require('./dataPath');
+
+const ASSETS = {
+    logo: path.join(__dirname, 'assets/logo.png'),
+    frame: path.join(__dirname, 'assets/frame.png'),
+    bg: path.join(__dirname, 'assets/neverland_bg.png'),
+};
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -137,8 +145,8 @@ function buildNumberButtons(correctNumber) {
     );
 }
 
-function buildStep1Embed(member, number, timeLeft) {
-    return new EmbedBuilder()
+function buildStep1Embed(member, number, timeLeft, urls = {}) {
+    const embed = new EmbedBuilder()
         .setColor(getColor(timeLeft))
         .setTitle('🌙 ネバーランドのとびらまえ')
         .setDescription(
@@ -154,10 +162,13 @@ function buildStep1Embed(member, number, timeLeft) {
             }
         )
         .setFooter({ text: 'したのボタンからえらんでね！' });
+    if (urls.logo) embed.setThumbnail(urls.logo);
+    if (urls.frame) embed.setImage(urls.frame);
+    return embed;
 }
 
-function buildStep2Embed(phrase, timeLeft) {
-    return new EmbedBuilder()
+function buildStep2Embed(phrase, timeLeft, urls = {}) {
+    const embed = new EmbedBuilder()
         .setColor(getColor(timeLeft))
         .setTitle('✨ ふるいことばのちかい')
         .setDescription(
@@ -172,6 +183,9 @@ function buildStep2Embed(phrase, timeLeft) {
             }
         )
         .setFooter({ text: 'ことばの力は、一字一句に宿っているよ ✨' });
+    if (urls.logo) embed.setThumbnail(urls.logo);
+    if (urls.bg) embed.setImage(urls.bg);
+    return embed;
 }
 
 async function startAuth(member) {
@@ -192,11 +206,27 @@ async function startAuth(member) {
 
     const buttonRow = buildNumberButtons(number);
 
+    const files = [
+        new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
+        new AttachmentBuilder(ASSETS.frame, { name: 'frame.png' }),
+        new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
+    ];
+    const initUrls = { logo: 'attachment://logo.png', frame: 'attachment://frame.png', bg: 'attachment://neverland_bg.png' };
+
     const message = await thread.send({
         content: `${member}`,
-        embeds: [buildStep1Embed(member, number, CONFIG.LIMIT_SECONDS)],
+        embeds: [buildStep1Embed(member, number, CONFIG.LIMIT_SECONDS, initUrls)],
         components: [buttonRow],
+        files,
     });
+
+    // use CDN URLs for subsequent edits so attachments aren't re-uploaded
+    const att = message.attachments;
+    const urls = {
+        logo: att.find(a => a.name === 'logo.png')?.url ?? null,
+        frame: att.find(a => a.name === 'frame.png')?.url ?? null,
+        bg: att.find(a => a.name === 'neverland_bg.png')?.url ?? null,
+    };
 
     const session = {
         phrase,
@@ -206,6 +236,7 @@ async function startAuth(member) {
         message,
         thread,
         buttonRow,
+        urls,
         timer: null,
     };
 
@@ -226,8 +257,8 @@ async function startAuth(member) {
             await s.message.edit({
                 embeds: [
                     s.step === 1
-                        ? buildStep1Embed(member, s.number, s.timeLeft)
-                        : buildStep2Embed(s.phrase, s.timeLeft),
+                        ? buildStep1Embed(member, s.number, s.timeLeft, s.urls)
+                        : buildStep2Embed(s.phrase, s.timeLeft, s.urls),
                 ],
                 components: s.step === 1 ? [s.buttonRow] : [],
             });
@@ -284,7 +315,13 @@ async function successAuth(member, session) {
                 .setDescription(
                     `${member} がなかまになったよ！\n` +
                     `みんなでなかよくしてね 🌟`
-                ),
+                )
+                .setThumbnail('attachment://logo.png')
+                .setImage('attachment://neverland_bg.png'),
+        ],
+        files: [
+            new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
+            new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
         ],
     });
 }
