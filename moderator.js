@@ -522,6 +522,7 @@ async function handleModerator(message) {
     if (message.author.bot) return;
 
     const hasRequiredRole = REQUIRED_ROLES.length > 0 && REQUIRED_ROLES.some(id => message.member?.roles.cache.has(id));
+    console.log(`[MOD] ${message.author.tag} roles=${[...message.member?.roles.cache.keys()].join(',')} required=${REQUIRED_ROLES} match=${hasRequiredRole}`);
     if (!hasRequiredRole) return;
 
     const rawContent = message.content || '';
