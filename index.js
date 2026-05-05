@@ -161,8 +161,8 @@ function buildStep2Embed(phrase, timeLeft) {
         .setColor(getColor(timeLeft))
         .setTitle('✨ ふるいことばのちかい')
         .setDescription(
-            'したのことばをそのままコピーして、このスレッドにおくってね 📜\n' +
-            'むずかしくないよ、コピペするだけ！'
+            'このふるいことばを、そっと唱えてみて 🌙\n' +
+            'このことばが、とびらを開く鍵だよ 🗝️'
         )
         .addFields(
             { name: '🪄 おまじないのことば', value: `\`\`\`${phrase}\`\`\`` },
@@ -171,7 +171,7 @@ function buildStep2Embed(phrase, timeLeft) {
                 value: `${getProgressBar(timeLeft, CONFIG.LIMIT_SECONDS)} ${timeLeft}びょう`,
             }
         )
-        .setFooter({ text: 'そのままコピペしてね！かえちゃダメだよ 🌟' });
+        .setFooter({ text: 'ことばの力は、一字一句に宿っているよ ✨' });
 }
 
 async function startAuth(member) {
