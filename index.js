@@ -17,6 +17,7 @@ const {
 const fs = require('fs');
 const path = require('path');
 const { DATA_DIR, WHITELIST } = require('./dataPath');
+const { handleModerator, handleImageDeleteButton } = require('./moderator');
 
 const ASSETS = {
     logo: path.join(__dirname, 'assets/logo.png'),
@@ -76,6 +77,7 @@ const client = new Client({
 
 const CONFIG = {
     VERIFY_ROLE_ID: process.env.VERIFY_ROLE_ID,
+    VIP_ROLE_ID: process.env.VIP_ROLE_ID,
     AUTH_CHANNEL_ID: process.env.AUTH_CHANNEL_ID,
     WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID,
     LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID,
@@ -342,7 +344,7 @@ client.on('guildMemberAdd', async (member) => {
     if (member.user.bot) return;
 
     if (whitelist.includes(member.id)) {
-        await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
+        await member.roles.add(CONFIG.VIP_ROLE_ID).catch(() => {});
         return;
     }
 
@@ -358,6 +360,9 @@ client.on('guildMemberRemove', (member) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
+    if (interaction.isButton() && interaction.customId.startsWith('del_img:')) {
+        return handleImageDeleteButton(interaction);
+    }
     if (!interaction.isButton() || !interaction.customId.startsWith('numsel_')) return;
 
     const session = sessions.get(interaction.user.id);
@@ -382,6 +387,7 @@ client.on('interactionCreate', async (interaction) => {
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
+    await handleModerator(message).catch(console.error);
 
     // 手動再認証コマンド（管理者のみ）
     if (message.content.startsWith('!reauth')) {
@@ -432,7 +438,7 @@ client.on('messageCreate', async (message) => {
                 whitelist.push(target.id);
                 saveWhitelist(whitelist);
             }
-            await target.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
+            await target.roles.add(CONFIG.VIP_ROLE_ID).catch(() => {});
             return message.reply(`${target} を顔パスリストに追加したよ ⭐`);
         }
 
