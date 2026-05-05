@@ -17,9 +17,9 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
 
-COPY index.js ./
+COPY index.js dataPath.js ./
 
-# アセットと whitelist は volume でマウント
-RUN mkdir -p assets
+# アセットと data は volume でマウント
+RUN mkdir -p assets data
 
 CMD ["node", "index.js"]

@@ -14,6 +14,9 @@ const {
 } = require('discord.js');
 const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
+const { DATA_DIR, WHITELIST } = require('./dataPath');
+
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const client = new Client({
     intents: [
@@ -32,7 +35,7 @@ const CONFIG = {
     LOG_CHANNEL_ID: 'YOUR_LOG_CHANNEL_ID',
     LIMIT_SECONDS: 30,
     NUMBER_COUNT: 5,
-    WHITELIST_FILE: './whitelist.json',
+    WHITELIST_FILE: WHITELIST,
     ASSETS: {
         BACKGROUND: './assets/neverland_bg.png',
         FRAME: './assets/frame.png',
