@@ -321,8 +321,6 @@ async function successAuth(member, session) {
     await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
     await logSuccess(member);
 
-    try { await session.thread.setArchived(true); } catch {}
-
     const channel = member.guild.channels.cache.get(CONFIG.WELCOME_CHANNEL_ID)
         || member.guild.channels.cache.get(CONFIG.AUTH_CHANNEL_ID);
 
