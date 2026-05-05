@@ -445,7 +445,7 @@ client.on('messageCreate', async (message) => {
     // ヘルプコマンド（管理者のみ）
     if (message.content.trim() === '!help') {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        return message.reply(new EmbedBuilder()
+        return message.reply({ embeds: [new EmbedBuilder()
             .setColor(0x5865F2)
             .setTitle('📖 コマンド一覧')
             .addFields(
@@ -454,8 +454,7 @@ client.on('messageCreate', async (message) => {
                 { name: '`!vip remove @ユーザー`', value: '顔パスリストから削除' },
                 { name: '`!vip list`', value: '顔パスリストを表示' },
                 { name: '`!help`', value: 'このヘルプを表示' },
-            )
-        );
+            )] });
     }
 
     // 認証メッセージ判定
