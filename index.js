@@ -411,7 +411,7 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-client.once('ready', () => {
+client.once('clientReady', () => {
     console.log(`${client.user.tag} きどうしたよ！`);
 });
 
