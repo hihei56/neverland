@@ -10,9 +10,7 @@ const {
     ActionRowBuilder,
     ButtonBuilder,
     ButtonStyle,
-    AttachmentBuilder,
 } = require('discord.js');
-const { createCanvas, loadImage } = require('canvas');
 const fs = require('fs');
 const { DATA_DIR, WHITELIST } = require('./dataPath');
 
@@ -29,18 +27,13 @@ const client = new Client({
 });
 
 const CONFIG = {
-    VERIFY_ROLE_ID: 'YOUR_ROLE_ID',
-    AUTH_CHANNEL_ID: 'YOUR_CHANNEL_ID',
-    WELCOME_CHANNEL_ID: 'YOUR_WELCOME_CHANNEL_ID',
-    LOG_CHANNEL_ID: 'YOUR_LOG_CHANNEL_ID',
+    VERIFY_ROLE_ID: process.env.VERIFY_ROLE_ID,
+    AUTH_CHANNEL_ID: process.env.AUTH_CHANNEL_ID,
+    WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID,
+    LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID,
     LIMIT_SECONDS: 30,
     NUMBER_COUNT: 5,
     WHITELIST_FILE: WHITELIST,
-    ASSETS: {
-        BACKGROUND: './assets/neverland_bg.png',
-        FRAME: './assets/frame.png',
-        LOGO: './assets/logo.png',
-    },
 };
 
 const AGES = [
@@ -112,73 +105,6 @@ async function logFail(member, reason) {
     );
 }
 
-async function generateWelcomeImage(member) {
-    const width = 1200;
-    const height = 500;
-    const canvas = createCanvas(width, height);
-    const ctx = canvas.getContext('2d');
-
-    try {
-        if (fs.existsSync(CONFIG.ASSETS.BACKGROUND)) {
-            const bg = await loadImage(CONFIG.ASSETS.BACKGROUND);
-            ctx.drawImage(bg, 0, 0, width, height);
-        } else {
-            const grad = ctx.createLinearGradient(0, 0, width, height);
-            grad.addColorStop(0, '#081120');
-            grad.addColorStop(1, '#13294b');
-            ctx.fillStyle = grad;
-            ctx.fillRect(0, 0, width, height);
-        }
-
-        const avatar = await loadImage(
-            member.user.displayAvatarURL({ extension: 'png', size: 256 })
-        );
-
-        const x = 160;
-        const y = height / 2;
-        const r = 110;
-
-        ctx.save();
-        ctx.beginPath();
-        ctx.arc(x, y, r, 0, Math.PI * 2);
-        ctx.closePath();
-        ctx.clip();
-        ctx.drawImage(avatar, x - r, y - r, r * 2, r * 2);
-        ctx.restore();
-
-        ctx.strokeStyle = '#d4af37';
-        ctx.lineWidth = 8;
-        ctx.beginPath();
-        ctx.arc(x, y, r + 4, 0, Math.PI * 2);
-        ctx.stroke();
-
-        if (fs.existsSync(CONFIG.ASSETS.FRAME)) {
-            const frame = await loadImage(CONFIG.ASSETS.FRAME);
-            ctx.drawImage(frame, 0, 0, width, height);
-        }
-
-        ctx.fillStyle = '#ffffff';
-        ctx.font = 'bold 54px serif';
-        ctx.fillText('ネバーランドへ、ようこそ！', 340, 170);
-
-        ctx.fillStyle = '#e0e7ff';
-        ctx.font = '36px sans-serif';
-        ctx.fillText(member.user.displayName || member.user.username, 340, 255);
-
-        ctx.fillStyle = '#d4af37';
-        ctx.font = '28px sans-serif';
-        ctx.fillText('きみをずっとまっていたよ ✨', 340, 320);
-
-        if (fs.existsSync(CONFIG.ASSETS.LOGO)) {
-            const logo = await loadImage(CONFIG.ASSETS.LOGO);
-            ctx.drawImage(logo, width - 180, 30, 140, 140);
-        }
-    } catch (error) {
-        console.error('画像生成エラー:', error);
-    }
-
-    return canvas.toBuffer('image/png');
-}
 
 function getProgressBar(timeLeft, total) {
     const filled = Math.max(0, Math.min(10, Math.round((timeLeft / total) * 10)));
@@ -343,7 +269,6 @@ async function successAuth(member, session) {
 
     try { await session.thread.setArchived(true); } catch {}
 
-    const image = await generateWelcomeImage(member);
     const channel = member.guild.channels.cache.get(CONFIG.WELCOME_CHANNEL_ID)
         || member.guild.channels.cache.get(CONFIG.AUTH_CHANNEL_ID);
 
@@ -357,10 +282,8 @@ async function successAuth(member, session) {
                 .setDescription(
                     `${member} がなかまになったよ！\n` +
                     `みんなでなかよくしてね 🌟`
-                )
-                .setImage('attachment://welcome.png'),
+                ),
         ],
-        files: [new AttachmentBuilder(image, { name: 'welcome.png' })],
     });
 }
 
