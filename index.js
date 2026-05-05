@@ -409,13 +409,23 @@ client.on('messageCreate', async (message) => {
     if (message.content.startsWith('!vip')) {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
 
-        const target = message.mentions.members?.first();
-        if (!target) {
-            return message.reply('使い方: `!vip add @ユーザー` / `!vip remove @ユーザー` / `!vip list`');
-        }
-
         const args = message.content.split(/\s+/);
         const sub = args[1];
+
+        if (sub === 'list') {
+            if (whitelist.length === 0) return message.reply('顔パスリストは空だよ');
+            const mentions = whitelist.map(id => `<@${id}>`).join('\n');
+            return message.reply(`⭐ 顔パスリスト\n${mentions}`);
+        }
+
+        // メンションまたはIDからメンバー取得
+        const targetId = message.mentions.members?.first()?.id ?? args[2]?.replace(/\D/g, '');
+        if (!targetId) {
+            return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
+        }
+        const target = message.guild.members.cache.get(targetId)
+            ?? await message.guild.members.fetch(targetId).catch(() => null);
+        if (!target) return message.reply('ユーザーが見つからなかったよ');
 
         if (sub === 'add') {
             if (!whitelist.includes(target.id)) {
@@ -432,14 +442,7 @@ client.on('messageCreate', async (message) => {
             return message.reply(`${target} を顔パスリストから外したよ`);
         }
 
-        return message.reply('使い方: `!vip add @ユーザー` / `!vip remove @ユーザー`');
-    }
-
-    if (message.content.trim() === '!vip list') {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        if (whitelist.length === 0) return message.reply('顔パスリストは空だよ');
-        const mentions = whitelist.map(id => `<@${id}>`).join('\n');
-        return message.reply(`⭐ 顔パスリスト\n${mentions}`);
+        return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
     }
 
     // ヘルプコマンド（管理者のみ）
