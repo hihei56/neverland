@@ -1,0 +1,13 @@
+{
+  "name": "neverland-bot",
+  "version": "1.0.0",
+  "description": "Neverland Discord Authentication Bot",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "canvas": "^2.11.2"
+  }
+}
