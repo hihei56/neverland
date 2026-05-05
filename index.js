@@ -361,9 +361,8 @@ client.on('messageCreate', async (message) => {
     if (!session || session.step !== 2) return;
     if (message.channel.id !== session.thread.id) return;
 
-    await message.delete().catch(() => {});
-
-    if (message.content.trim() === session.phrase) {
+    const normalize = (s) => s.trim().normalize('NFC').replace(/\s+/g, ' ');
+    if (normalize(message.content) === normalize(session.phrase)) {
         await successAuth(message.member, session);
     } else {
         await failAuth(message.member, session, 'wrong');
