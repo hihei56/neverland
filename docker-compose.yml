@@ -1,0 +1,14 @@
+services:
+  neverland-bot:
+    build: .
+    container_name: neverland-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./assets:/app/assets:ro
+      - ./whitelist.json:/app/whitelist.json
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
