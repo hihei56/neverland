@@ -405,6 +405,43 @@ client.on('messageCreate', async (message) => {
         return;
     }
 
+    // 顔パスコマンド（管理者のみ）
+    if (message.content.startsWith('!vip')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+        const target = message.mentions.members?.first();
+        if (!target) {
+            return message.reply('使い方: `!vip add @ユーザー` / `!vip remove @ユーザー` / `!vip list`');
+        }
+
+        const args = message.content.split(/\s+/);
+        const sub = args[1];
+
+        if (sub === 'add') {
+            if (!whitelist.includes(target.id)) {
+                whitelist.push(target.id);
+                saveWhitelist(whitelist);
+            }
+            await target.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
+            return message.reply(`${target} を顔パスリストに追加したよ ⭐`);
+        }
+
+        if (sub === 'remove') {
+            whitelist = whitelist.filter(id => id !== target.id);
+            saveWhitelist(whitelist);
+            return message.reply(`${target} を顔パスリストから外したよ`);
+        }
+
+        return message.reply('使い方: `!vip add @ユーザー` / `!vip remove @ユーザー`');
+    }
+
+    if (message.content.trim() === '!vip list') {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        if (whitelist.length === 0) return message.reply('顔パスリストは空だよ');
+        const mentions = whitelist.map(id => `<@${id}>`).join('\n');
+        return message.reply(`⭐ 顔パスリスト\n${mentions}`);
+    }
+
     // 認証メッセージ判定
     const session = sessions.get(message.author.id);
     if (!session || session.step !== 2) return;
