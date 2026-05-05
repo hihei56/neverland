@@ -163,7 +163,7 @@ function buildStep1Embed(member, number, timeLeft, urls = {}) {
         )
         .setFooter({ text: 'したのボタンからえらんでね！' });
     if (urls.logo) embed.setThumbnail(urls.logo);
-    if (urls.frame) embed.setImage(urls.frame);
+    if (urls.bg) embed.setImage(urls.bg);
     return embed;
 }
 
@@ -208,10 +208,9 @@ async function startAuth(member) {
 
     const files = [
         new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
-        new AttachmentBuilder(ASSETS.frame, { name: 'frame.png' }),
         new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
     ];
-    const initUrls = { logo: 'attachment://logo.png', frame: 'attachment://frame.png', bg: 'attachment://neverland_bg.png' };
+    const initUrls = { logo: 'attachment://logo.png', bg: 'attachment://neverland_bg.png' };
 
     const message = await thread.send({
         content: `${member}`,
