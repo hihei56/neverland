@@ -216,7 +216,7 @@ function buildStep2Embed(phrase, timeLeft, urls = {}) {
             'このことばが、とびらを開く鍵だよ 🗝️'
         )
         .addFields(
-            { name: '🪄 おまじないのことば', value: `**${phrase}**` },
+            { name: '🪄 おまじないのことば', value: `\`\`\`${phrase}\`\`\`` },
             {
                 name: '⏳ のこりじかん',
                 value: `${getProgressBar(timeLeft, CONFIG.LIMIT_SECONDS)} ${timeLeft}びょう`,
