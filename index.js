@@ -1,6 +1,8 @@
 // Neverland Authentication Bot
 // Private thread version + Logging + Reauth command
 
+require('dotenv').config();
+
 const {
     Client,
     GatewayIntentBits,
