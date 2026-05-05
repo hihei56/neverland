@@ -361,7 +361,12 @@ client.on('messageCreate', async (message) => {
     if (!session || session.step !== 2) return;
     if (message.channel.id !== session.thread.id) return;
 
-    const normalize = (s) => s.trim().normalize('NFC').replace(/\s+/g, ' ');
+    const normalize = (s) => s
+        .trim()
+        .normalize('NFC')
+        .replace(/[​-‍﻿︀-️]/g, '')
+        .replace(/`/g, '')
+        .replace(/\s+/g, ' ');
     if (normalize(message.content) === normalize(session.phrase)) {
         await successAuth(message.member, session);
     } else {
