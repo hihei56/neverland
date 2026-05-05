@@ -214,7 +214,7 @@ function buildStep2Embed(phrase, timeLeft, urls = {}) {
             'このことばが、とびらを開く鍵だよ 🗝️'
         )
         .addFields(
-            { name: '🪄 おまじないのことば', value: `\`\`\`${phrase}\`\`\`` },
+            { name: '🪄 おまじないのことば', value: `**${phrase}**` },
             {
                 name: '⏳ のこりじかん',
                 value: `${getProgressBar(timeLeft, CONFIG.LIMIT_SECONDS)} ${timeLeft}びょう`,
@@ -310,7 +310,7 @@ async function failAuth(member, session, reason = 'timeout') {
         });
     } catch {}
 
-    try { await session.thread.setArchived(true); } catch {}
+    try { await session.thread.delete(); } catch {}
     try { await member.kick('にゅうこくしっぱい'); } catch {}
 }
 
