@@ -20,9 +20,47 @@ const { DATA_DIR, WHITELIST } = require('./dataPath');
 
 const ASSETS = {
     logo: path.join(__dirname, 'assets/logo.png'),
-    frame: path.join(__dirname, 'assets/frame.png'),
     bg: path.join(__dirname, 'assets/neverland_bg.png'),
 };
+
+const ASSET_CACHE_FILE = path.join(__dirname, 'data', 'asset_urls.json');
+let assetUrls = { logo: null, bg: null };
+
+function isCdnUrlValid(url) {
+    if (!url) return false;
+    const match = url.match(/[?&]ex=([0-9a-f]+)/i);
+    if (!match) return true;
+    return Date.now() < parseInt(match[1], 16) * 1000 - 3600000;
+}
+
+async function initAssets(client) {
+    try {
+        if (fs.existsSync(ASSET_CACHE_FILE)) {
+            const cached = JSON.parse(fs.readFileSync(ASSET_CACHE_FILE, 'utf8'));
+            if (isCdnUrlValid(cached.logo) && isCdnUrlValid(cached.bg)) {
+                assetUrls = cached;
+                return;
+            }
+        }
+    } catch {}
+
+    const guild = client.guilds.cache.first();
+    if (!guild) return;
+    const logChannel = guild.channels.cache.get(CONFIG.LOG_CHANNEL_ID);
+    if (!logChannel) return;
+
+    const msg = await logChannel.send({
+        content: '🖼️',
+        files: [
+            new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
+            new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
+        ],
+    });
+
+    assetUrls.logo = msg.attachments.find(a => a.name === 'logo.png')?.url ?? null;
+    assetUrls.bg = msg.attachments.find(a => a.name === 'neverland_bg.png')?.url ?? null;
+    fs.writeFileSync(ASSET_CACHE_FILE, JSON.stringify(assetUrls));
+}
 
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
@@ -206,26 +244,11 @@ async function startAuth(member) {
 
     const buttonRow = buildNumberButtons(number);
 
-    const files = [
-        new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
-        new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
-    ];
-    const initUrls = { logo: 'attachment://logo.png', bg: 'attachment://neverland_bg.png' };
-
     const message = await thread.send({
         content: `${member}`,
-        embeds: [buildStep1Embed(member, number, CONFIG.LIMIT_SECONDS, initUrls)],
+        embeds: [buildStep1Embed(member, number, CONFIG.LIMIT_SECONDS, assetUrls)],
         components: [buttonRow],
-        files,
     });
-
-    // use CDN URLs for subsequent edits so attachments aren't re-uploaded
-    const att = message.attachments;
-    const urls = {
-        logo: att.find(a => a.name === 'logo.png')?.url ?? null,
-        frame: att.find(a => a.name === 'frame.png')?.url ?? null,
-        bg: att.find(a => a.name === 'neverland_bg.png')?.url ?? null,
-    };
 
     const session = {
         phrase,
@@ -235,7 +258,6 @@ async function startAuth(member) {
         message,
         thread,
         buttonRow,
-        urls,
         timer: null,
     };
 
@@ -256,8 +278,8 @@ async function startAuth(member) {
             await s.message.edit({
                 embeds: [
                     s.step === 1
-                        ? buildStep1Embed(member, s.number, s.timeLeft, s.urls)
-                        : buildStep2Embed(s.phrase, s.timeLeft, s.urls),
+                        ? buildStep1Embed(member, s.number, s.timeLeft, assetUrls)
+                        : buildStep2Embed(s.phrase, s.timeLeft, assetUrls),
                 ],
                 components: s.step === 1 ? [s.buttonRow] : [],
             });
@@ -306,23 +328,16 @@ async function successAuth(member, session) {
 
     if (!channel) return;
 
-    await channel.send({
-        embeds: [
-            new EmbedBuilder()
-                .setColor(0x57F287)
-                .setTitle('🎉 ネバーランドへようこそ！')
-                .setDescription(
-                    `${member} がなかまになったよ！\n` +
-                    `みんなでなかよくしてね 🌟`
-                )
-                .setThumbnail('attachment://logo.png')
-                .setImage('attachment://neverland_bg.png'),
-        ],
-        files: [
-            new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
-            new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
-        ],
-    });
+    const welcomeEmbed = new EmbedBuilder()
+        .setColor(0x57F287)
+        .setTitle('🎉 ネバーランドへようこそ！')
+        .setDescription(
+            `${member} がなかまになったよ！\n` +
+            `みんなでなかよくしてね 🌟`
+        );
+    if (assetUrls.logo) welcomeEmbed.setThumbnail(assetUrls.logo);
+    if (assetUrls.bg) welcomeEmbed.setImage(assetUrls.bg);
+    await channel.send({ embeds: [welcomeEmbed] });
 }
 
 client.on('guildMemberAdd', async (member) => {
@@ -410,8 +425,9 @@ client.on('messageCreate', async (message) => {
     }
 });
 
-client.once('clientReady', () => {
-    console.log(`${client.user.tag} きどうしたよ！`);
+client.once('clientReady', async (c) => {
+    console.log(`${c.user.tag} きどうしたよ！`);
+    await initAssets(c).catch(console.error);
 });
 
 client.login(process.env.DISCORD_TOKEN);
