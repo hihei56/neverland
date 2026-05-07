@@ -16,7 +16,7 @@ const {
 } = require('discord.js');
 const fs = require('fs');
 const path = require('path');
-const { DATA_DIR, WHITELIST } = require('./dataPath');
+const { DATA_DIR, WHITELIST, GUESTLIST } = require('./dataPath');
 const { handleModerator, handleImageDeleteButton } = require('./moderator');
 
 const ASSETS = {
@@ -84,6 +84,7 @@ const CONFIG = {
     LIMIT_SECONDS: 30,
     NUMBER_COUNT: 5,
     WHITELIST_FILE: WHITELIST,
+    GUESTLIST_FILE: GUESTLIST,
 };
 
 const AGES = [
@@ -117,7 +118,23 @@ function saveWhitelist(list) {
     fs.writeFileSync(CONFIG.WHITELIST_FILE, JSON.stringify(list, null, 2));
 }
 
+function loadGuestlist() {
+    try {
+        if (!fs.existsSync(CONFIG.GUESTLIST_FILE)) {
+            fs.writeFileSync(CONFIG.GUESTLIST_FILE, '[]');
+        }
+        return JSON.parse(fs.readFileSync(CONFIG.GUESTLIST_FILE, 'utf8'));
+    } catch {
+        return [];
+    }
+}
+
+function saveGuestlist(list) {
+    fs.writeFileSync(CONFIG.GUESTLIST_FILE, JSON.stringify(list, null, 2));
+}
+
 let whitelist = loadWhitelist();
+let guestlist = loadGuestlist();
 const sessions = new Map();
 let authPaused = false;
 
@@ -132,6 +149,19 @@ async function logSuccess(member) {
     await sendLog(member.guild, new EmbedBuilder()
         .setColor(0x57F287)
         .setTitle('✅ にゅうこくせいこう')
+        .addFields(
+            { name: 'ユーザー', value: `${member} (${member.user.tag})`, inline: true },
+            { name: 'ID', value: member.id, inline: true },
+        )
+        .setThumbnail(member.user.displayAvatarURL())
+        .setTimestamp()
+    );
+}
+
+async function logGuestEnter(member) {
+    await sendLog(member.guild, new EmbedBuilder()
+        .setColor(0xF1C40F)
+        .setTitle('🌟 来賓にゅうこく')
         .addFields(
             { name: 'ユーザー', value: `${member} (${member.user.tag})`, inline: true },
             { name: 'ID', value: member.id, inline: true },
@@ -227,6 +257,46 @@ function buildStep2Embed(phrase, timeLeft, urls = {}) {
     if (urls.logo) embed.setThumbnail(urls.logo);
     if (urls.bg) embed.setImage(urls.bg);
     return embed;
+}
+
+async function startGuestWelcome(member) {
+    const authChannel = member.guild.channels.cache.get(CONFIG.AUTH_CHANNEL_ID);
+    if (!authChannel) return;
+
+    const thread = await authChannel.threads.create({
+        name: `🌟 らいひん-${member.user.username}`,
+        autoArchiveDuration: 60,
+        type: ChannelType.PrivateThread,
+        reason: 'らいひんかんげい',
+    });
+
+    await thread.members.add(member.id);
+
+    const enterButton = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+            .setCustomId('guest_enter')
+            .setLabel('✨ ネバーランドへ入国する')
+            .setStyle(ButtonStyle.Success)
+    );
+
+    const embed = new EmbedBuilder()
+        .setColor(0xF1C40F)
+        .setTitle('🌟 ようこそ、たいせつなお客さま')
+        .setDescription(
+            `${member}、ネバーランドへようこそ！\n\n` +
+            `あなたのことを、みんながまっていたよ 🌙\n` +
+            `したのボタンをおして、とびらをあけてね ✨`
+        )
+        .setFooter({ text: 'ネバーランドはいつでもあなたをかんげいしているよ 💫' });
+
+    if (assetUrls.logo) embed.setThumbnail(assetUrls.logo);
+    if (assetUrls.bg) embed.setImage(assetUrls.bg);
+
+    await thread.send({
+        content: `${member}`,
+        embeds: [embed],
+        components: [enterButton],
+    });
 }
 
 async function startAuth(member) {
@@ -349,6 +419,11 @@ client.on('guildMemberAdd', async (member) => {
         return;
     }
 
+    if (guestlist.includes(member.id)) {
+        await startGuestWelcome(member);
+        return;
+    }
+
     if (authPaused) {
         await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
         console.log(`[AUTH PAUSE] ${member.user.tag}(${member.id}) 認証スキップで入国`);
@@ -370,6 +445,33 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith('del_img:')) {
         return handleImageDeleteButton(interaction);
     }
+
+    if (interaction.isButton() && interaction.customId === 'guest_enter') {
+        const member = interaction.member;
+        if (!member) return interaction.reply({ content: 'エラーが発生したよ。', ephemeral: true });
+
+        await interaction.deferUpdate();
+
+        await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
+        await logGuestEnter(member);
+
+        const successEmbed = new EmbedBuilder()
+            .setColor(0x57F287)
+            .setTitle('🎉 ネバーランドへようこそ！')
+            .setDescription(`${member} がなかまになったよ！\nみんなでなかよくしてね 🌟`);
+        if (assetUrls.logo) successEmbed.setThumbnail(assetUrls.logo);
+        if (assetUrls.bg) successEmbed.setImage(assetUrls.bg);
+
+        await interaction.editReply({ embeds: [successEmbed], components: [] });
+
+        const welcomeChannel = member.guild.channels.cache.get(CONFIG.WELCOME_CHANNEL_ID)
+            || member.guild.channels.cache.get(CONFIG.AUTH_CHANNEL_ID);
+        if (welcomeChannel) {
+            await welcomeChannel.send({ embeds: [successEmbed] }).catch(() => {});
+        }
+        return;
+    }
+
     if (!interaction.isButton() || !interaction.customId.startsWith('numsel_')) return;
 
     const session = sessions.get(interaction.user.id);
@@ -460,6 +562,41 @@ client.on('messageCreate', async (message) => {
         return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
     }
 
+    // 来賓管理コマンド（管理者のみ）
+    if (message.content.startsWith('!guest')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+        const args = message.content.split(/\s+/);
+        const sub = args[1];
+
+        if (sub === 'list') {
+            if (guestlist.length === 0) return message.reply('来賓リストは空だよ');
+            const mentions = guestlist.map(id => `<@${id}>`).join('\n');
+            return message.reply(`🌟 来賓リスト\n${mentions}`);
+        }
+
+        const targetId = message.mentions.members?.first()?.id ?? args[2]?.replace(/\D/g, '');
+        if (!targetId) {
+            return message.reply('使い方: `!guest add @ユーザー or ID` / `!guest remove @ユーザー or ID` / `!guest list`');
+        }
+
+        if (sub === 'add') {
+            if (!guestlist.includes(targetId)) {
+                guestlist.push(targetId);
+                saveGuestlist(guestlist);
+            }
+            return message.reply(`ID \`${targetId}\` を来賓リストに追加したよ 🌟`);
+        }
+
+        if (sub === 'remove') {
+            guestlist = guestlist.filter(id => id !== targetId);
+            saveGuestlist(guestlist);
+            return message.reply(`ID \`${targetId}\` を来賓リストから外したよ`);
+        }
+
+        return message.reply('使い方: `!guest add @ユーザー or ID` / `!guest remove @ユーザー or ID` / `!guest list`');
+    }
+
     // 入国審査一時停止コマンド（管理者のみ）
     if (message.content.trim() === '!auth pause') {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
@@ -489,6 +626,9 @@ client.on('messageCreate', async (message) => {
                 { name: '`!vip add @ユーザー`', value: '顔パスリストに追加＋認証ロール付与' },
                 { name: '`!vip remove @ユーザー`', value: '顔パスリストから削除' },
                 { name: '`!vip list`', value: '顔パスリストを表示' },
+                { name: '`!guest add @ユーザー or ID`', value: '来賓リストに追加（入国時に歓迎embed＋ボタン）' },
+                { name: '`!guest remove @ユーザー or ID`', value: '来賓リストから削除' },
+                { name: '`!guest list`', value: '来賓リストを表示' },
                 { name: '`!auth pause`', value: '入国審査を一時停止（この間の入国者は認証不要）' },
                 { name: '`!auth resume`', value: '入国審査を再開' },
                 { name: '`!auth status`', value: '入国審査の現在の状態を確認' },

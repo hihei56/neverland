@@ -5,4 +5,5 @@ const DATA_DIR = path.join(__dirname, 'data');
 module.exports = {
     DATA_DIR,
     WHITELIST: path.join(DATA_DIR, 'whitelist.json'),
+    GUESTLIST: path.join(DATA_DIR, 'guestlist.json'),
 };
