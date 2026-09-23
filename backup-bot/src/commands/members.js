@@ -27,7 +27,7 @@ async function handleMembers(interaction, app) {
             );
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
-                .setTitle(`${targetName} VERIFY`)
+                .setTitle(`kibicord VERIFY`)
                 .setDescription('荒らし対策用の認証です。ボタンから認証してください。')
                 .setFooter({ text: `任意 ・ プライバシー: ${app.config.oauth.publicBaseUrl}/privacy` });
             // 強制・報酬付与はしないこと（任意の認証であることを明記）。
