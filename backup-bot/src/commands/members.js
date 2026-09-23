@@ -20,8 +20,8 @@ async function handleMembers(interaction, app) {
                 return await interaction.reply({ content: '⛔ for_guild が ALLOWED_GUILD_IDS に含まれていません。', flags: MessageFlags.Ephemeral });
             }
             const targetName = interaction.client.guilds.cache.get(targetGuildId)?.name || `サーバー ${targetGuildId}`;
-            // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
-            const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${targetGuildId}`;
+          // Discord 認可 URL を直接ボタンに埋め込む（外部ドメイン警告を避ける）。state は 24h 有効。
+            const url = app.consent.directAuthorizeUrl(targetGuildId);
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証開始！').setURL(url),
             );
