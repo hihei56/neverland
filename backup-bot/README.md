@@ -2,10 +2,6 @@
 
 自分が所有・管理する Discord サーバーの **設定** をバックアップ/復元する Bot です（discord.js v14 / JavaScript）。
 
-動作モードは `.env` の `APP_MODE` で切り替えます（コマンドはどちらも管理者限定）。
-- `backup`（既定）: 設定バックアップ＋メンバー再参加（`identify guilds.join` を取得）
-- `link`: 再参加なし。email/connections の収集のみ（`guilds.join` は取得しない）。`/members rejoin` は無効
-
 
 - Discord 公式 Bot API と OAuth2 だけを使います（ユーザートークン・self-bot は使いません）
 - `ALLOWED_GUILD_IDS` のギルドで、`BOT_OWNER_IDS` に含まれ、管理者権限を持つユーザーだけが操作できます

@@ -12,8 +12,7 @@ module.exports = {
         // 認証・モデレーション・しりとり等（ルートの Neverland Bot）。 .env = ./.env
         { name: 'neverland-bot', script: 'index.js', cwd: __dirname, ...common },
 
-        // サーバー設定バックアップ/復元 Bot（.env の APP_MODE=link で連携専用モードにも切替可）。
-        // .env = ./backup-bot/.env
+        // サーバー設定バックアップ/復元 Bot。 .env = ./backup-bot/.env
         { name: 'neverland-backup', script: 'src/index.js', cwd: path.join(__dirname, 'backup-bot'), ...common },
     ],
 };

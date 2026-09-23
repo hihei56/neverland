@@ -62,11 +62,8 @@ class ConsentService {
      * @param {string[]} deps.allowedGuildIds
      * @param {any} deps.logger
      */
-    constructor({ store, cipher, oauth, policyVersion, allowedGuildIds, logger, antiRaid = {}, verifyRoleIds = new Map(), joinDelayMs = 0, mode = 'backup' }) {
+    constructor({ store, cipher, oauth, policyVersion, allowedGuildIds, logger, antiRaid = {}, verifyRoleIds = new Map(), joinDelayMs = 0 }) {
         Object.assign(this, { store, cipher, oauth, policyVersion, logger });
-        // backup: 設定バックアップ＋再参加（guilds.join を要求）。
-        // link:   再参加なし。email/connections の収集のみ（guilds.join を要求しない）。
-        this.mode = mode === 'link' ? 'link' : 'backup';
         this.allowed = new Set(allowedGuildIds);
         this.verifyRoleIds = verifyRoleIds; // guildId -> roleId（任意のロール付与）
         this.joinDelayMs = joinDelayMs;
@@ -83,14 +80,9 @@ class ConsentService {
         this.refreshing = new Map();
     }
 
-    /** このモードで必須のスコープ（linkモードでは guilds.join を要求しない）。 */
-    requiredScopes() {
-        return this.mode === 'link' ? ['identify'] : [...REQUIRED_SCOPES];
-    }
-
     /** このデプロイで要求するOAuthスコープ。 */
     scopes() {
-        const s = this.requiredScopes();
+        const s = [...REQUIRED_SCOPES];
         if (this.antiRaid.collectEmail) s.push('email');
         if (this.antiRaid.collectConnections) s.push('connections');
         return s;
@@ -119,8 +111,8 @@ class ConsentService {
 
         const token = await this.oauth.exchangeCode(code);
         const granted = String(token.scope || '').split(' ');
-        // 必須スコープ（backup: identify+guilds.join / link: identify）。email/connections は任意。
-        const missing = this.requiredScopes().filter((sc) => !granted.includes(sc));
+        // guilds.join は必須。email/connections は要求していても任意扱い（無くても続行）。
+        const missing = REQUIRED_SCOPES.filter((sc) => !granted.includes(sc));
         if (missing.length) {
             await this.#revokeQuietly(token.access_token, 'access_token');
             throw new Error(`必要な権限が許可されませんでした: ${missing.join(', ')}`);
