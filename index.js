@@ -18,6 +18,8 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR, WHITELIST } = require('./dataPath');
 const { handleModerator, handleImageDeleteButton } = require('./moderator');
+const { initShiritori, handleShiritoriMessage, resetShiritoriGame } = require('./shiritori');
+const { getSettings: getShiritoriSettings, saveSettings: saveShiritoriSettings } = require('./shiritori_settings');
 
 const ASSETS = {
     logo: path.join(__dirname, 'assets/logo.png'),
@@ -411,6 +413,31 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     await handleModerator(message).catch(console.error);
 
+    // しりとり設定コマンド（管理者のみ）
+    if (message.content.trim().startsWith('!shiritori')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const arg = message.content.trim().split(/\s+/)[1] || '';
+        const settings = getShiritoriSettings();
+        if (arg === 'off') {
+            settings.shiritoriChannelId = null;
+            saveShiritoriSettings(settings);
+            resetShiritoriGame(message.channel.id);
+            return message.reply('🚫 しりとりを無効にしたよ。');
+        }
+        if (arg === 'reset') {
+            resetShiritoriGame(message.channel.id);
+            return message.reply('🔄 このチャンネルのしりとりをリセットしたよ。');
+        }
+        // 引数なし → このチャンネルをしりとり部屋にする
+        settings.shiritoriChannelId = message.channel.id;
+        saveShiritoriSettings(settings);
+        resetShiritoriGame(message.channel.id);
+        return message.reply('🎉 このチャンネルをしりとり部屋にしたよ！単語を送ってあそんでね（`!shiritori off` で無効、`!shiritori reset` でリセット）');
+    }
+
+    // しりとり進行（設定チャンネルのみ・shiritori.js 側で判定）
+    handleShiritoriMessage(message).catch((err) => console.error('[Shiritori]', err));
+
     // 手動再認証コマンド（管理者のみ）
     if (message.content.startsWith('!reauth')) {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
@@ -527,6 +554,7 @@ client.on('messageCreate', async (message) => {
                 { name: '`!auth pause`', value: '入国審査を一時停止（この間の入国者は認証不要）' },
                 { name: '`!auth resume`', value: '入国審査を再開' },
                 { name: '`!auth status`', value: '入国審査の現在の状態を確認' },
+                { name: '`!shiritori`', value: 'このチャンネルをしりとり部屋にする（`off`で無効 / `reset`でリセット）' },
                 { name: '`!help`', value: 'このヘルプを表示' },
             )] });
     }
@@ -552,6 +580,7 @@ client.on('messageCreate', async (message) => {
 client.once('clientReady', async (c) => {
     console.log(`${c.user.tag} きどうしたよ！`);
     await initAssets(c).catch(console.error);
+    initShiritori();
 });
 
 client.login(process.env.DISCORD_TOKEN);
