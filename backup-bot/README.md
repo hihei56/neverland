@@ -37,7 +37,7 @@ backup-bot/
 │   ├── restore/
 │   │   ├── planner.js            差分から復元プランを作る（API を呼ばない純粋関数）
 │   │   └── executor.js           プランを実行し、復元ログを保存
-│   ├── consent/                  OAuth2 同意・暗号化・オプトアウト・削除・再参加
+│   ├── consent/                  OAuth2 同意・暗号化・削除・再参加・荒らし対策取得
 │   ├── web/server.js             同意ページ・プライバシーポリシー・OAuth コールバック
 │   ├── commands/                 スラッシュコマンドの定義とハンドラ
 │   ├── util/                     ロガー、キューとリトライ
@@ -61,7 +61,7 @@ backup-bot/
 
 ```bash
 npm install
-npm run register   # /backup /members はギルドに、/privacy はグローバルに登録
+npm run register   # /backup /members をギルドに登録（コマンドは管理者限定）
 npm start
 npm test
 ```
@@ -104,14 +104,21 @@ npm test
 2. 希望した人が説明を読み、Discord の認可画面で `identify guilds.join` を許可する
 3. サーバーを作り直したら、新しいサーバーで `/members rejoin source_guild:<元のID>` を実行する（dry-run）。表示された確認コードを付けて、もう一度実行する
 
-本人が使えるコマンドはすべてエフェメラルで、Bot との DM でも使えます。
+**コマンドは管理者限定です。** 利用者向けのスラッシュコマンドは置いていません。
 
-- `/privacy policy`：プライバシーポリシーを表示する（Web の `/privacy` でも見られる）
-- `/privacy status`：自分の同意状況を見る
-- `/privacy optout [guild_id]`：同意を取り消す。トークンは Discord 側で失効させてから破棄する
-- `/privacy delete confirm:True`：同意記録と履歴をすべて削除する
+- 利用者の取り消し：Discord の「設定 > 認証済みアプリ」からこのアプリの連携を解除する。以後トークンは無効になり、次回処理時に破棄する（`invalid_grant` を検知して自動で失効扱いにする）
+- 利用者の削除依頼：運営者（`PRIVACY_CONTACT`）に連絡してもらい、管理者が `/members forget user_id:<ID> confirm:<同じID>` で削除する
+- プライバシーポリシーは Web の `/privacy` で公開する（`/members consent-link` の案内にも載る）
 
-トークンは AES-256-GCM で暗号化して保存し、ログには残しません。リフレッシュで `invalid_grant` が返った場合（本人が連携を解除した場合）は、その時点でトークンを破棄します。
+トークン・メール・連携アカウントは AES-256-GCM で暗号化して保存し、ログには残しません。IP は既定でハッシュのみ記録します。
+
+### 荒らし対策の追加取得（任意・既定オフ）
+
+`.env` で有効化すると、認証時に本人の OAuth 許可の範囲で以下も取得します（有効化した場合は `/privacy` とサーバー掲示で必ず周知してください）。
+
+- `VERIFY_COLLECT_EMAIL` / `VERIFY_COLLECT_CONNECTIONS`：メール・連携アカウントを暗号化保存
+- `VERIFY_LOG_IP`：認証時の IP を HMAC ハッシュで記録（同一 IP の複数アカウント検出用。生 IP は残さない）／`VERIFY_LOG_IP_RAW` で生 IP を暗号化保存
+- `CONSENT_MODE=simple`：同意ページを RestoreCord 風のシンプル表示にする（参加先の限定・削除・暗号化・レート制限は維持）
 
 ## レート制限とエラー
 

@@ -107,3 +107,24 @@ test('プライバシーポリシー: 有効化した項目を必ず明記する
     assert.match(on, /連携している外部アカウント/);
     assert.match(on, /IPアドレスのハッシュ値/);
 });
+
+test('管理者による削除(deleteAll)で記録ごと消え、トークンは失効される', async () => {
+    const revoked = [];
+    const { svc, store } = setup({ collectEmail: true, logIp: true }, { scope: 'identify guilds.join email' });
+    svc.oauth.revoke = async (t) => { revoked.push(t); };
+    const state = new URL(svc.startAuthorization(GID)).searchParams.get('state');
+    await svc.completeAuthorization('code', state, { ip: '203.0.113.9' });
+    assert.notEqual(await store.get('300000000000000003', GID), null);
+
+    const removed = await svc.deleteAll('300000000000000003');
+    assert.ok(removed > 0);
+    assert.equal(await store.get('300000000000000003', GID), null);
+    assert.ok(revoked.includes('rt')); // リフレッシュトークンを失効
+});
+
+test('プライバシーポリシーに廃止した /privacy コマンドを載せない', () => {
+    const text = privacyPolicyText({ policyVersion: 'v1', contact: 'c', operatorName: 'o', antiRaid: {} });
+    assert.ok(!text.includes('/privacy'));
+    assert.match(text, /認証済みアプリ/);   // 連携解除の導線
+    assert.match(text, /運営者/);           // 削除の依頼先
+});

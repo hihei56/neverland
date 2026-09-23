@@ -32,21 +32,15 @@ const members = new SlashCommandBuilder()
     .addSubcommand((s) => s.setName('rejoin').setDescription('同意済みメンバーをこのサーバーに再参加させる（既定は dry-run）')
         .addStringOption((o) => o.setName('source_guild').setDescription('同意を取得した元サーバーID（既定: このサーバー）'))
         .addBooleanOption((o) => o.setName('execute').setDescription('true で実行（既定: false = dry-run）'))
-        .addStringOption((o) => o.setName('confirm').setDescription('dry-run で表示された確認コード')));
-
-// 本人向けコマンド: サーバーを抜けた人も使えるよう、グローバル + DM でも利用可能。
-const privacy = new SlashCommandBuilder()
-    .setName('privacy')
-    .setDescription('再参加機能のプライバシー設定')
-    .setContexts(InteractionContextType.Guild, InteractionContextType.BotDM)
-    .addSubcommand((s) => s.setName('policy').setDescription('プライバシーポリシーを表示'))
-    .addSubcommand((s) => s.setName('status').setDescription('自分の同意状況を確認'))
-    .addSubcommand((s) => s.setName('optout').setDescription('再参加機能への同意を取り消す（トークンを失効・破棄）')
-        .addStringOption((o) => o.setName('guild_id').setDescription('特定サーバーのみ取り消す場合のID（省略で全て）')))
-    .addSubcommand((s) => s.setName('delete').setDescription('自分に関する同意記録をすべて削除')
-        .addBooleanOption((o) => o.setName('confirm').setDescription('true で削除を実行').setRequired(true)));
+        .addStringOption((o) => o.setName('confirm').setDescription('dry-run で表示された確認コード')))
+    // 本人からの依頼を受けて管理者が実行する削除（コマンドは管理者限定）
+    .addSubcommand((s) => s.setName('forget').setDescription('指定ユーザーの同意・トークン・取得情報をすべて削除（本人の依頼を受けて）')
+        .addStringOption((o) => o.setName('user_id').setDescription('対象ユーザーID').setRequired(true))
+        .addStringOption((o) => o.setName('confirm').setDescription('確認のため user_id をもう一度入力').setRequired(true)));
 
 module.exports = {
     guildCommands: [backup.toJSON(), members.toJSON()],
-    globalCommands: [privacy.toJSON()],
+    // 本人向けのグローバルコマンドは廃止（コマンドは管理者限定）。
+    // 利用者は Discord「認証済みアプリ」から連携解除でき、削除は運営者へ依頼する（プライバシーポリシー参照）。
+    globalCommands: [],
 };

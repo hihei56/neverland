@@ -23,7 +23,7 @@ async function handleMembers(interaction, app) {
                     '希望する人だけ、以下から内容を確認して同意してください。同意しなくても何も変わりません。',
                     url,
                     `プライバシーポリシー: ${app.config.oauth.publicBaseUrl}/privacy`,
-                    '取り消しはいつでも `/privacy optout`、データ削除は `/privacy delete` でできます。',
+                    '取り消しは Discord の「設定 > 認証済みアプリ」から連携解除でできます。データ削除の希望は管理者までご連絡ください。',
                 ].join('\n'),
             });
         }
@@ -33,6 +33,19 @@ async function handleMembers(interaction, app) {
         if (sub === 'stats') {
             const n = await app.consent.countActive(interaction.guildId);
             return await interaction.editReply(`同意済み（有効）: ${n} 人`);
+        }
+
+        if (sub === 'forget') {
+            const userId = interaction.options.getString('user_id', true);
+            if (!SNOWFLAKE.test(userId)) return await interaction.editReply('user_id の形式が不正です。');
+            if (interaction.options.getString('confirm', true) !== userId) {
+                return await interaction.editReply('確認用の入力が user_id と一致しません。削除していません。');
+            }
+            const removed = await app.consent.deleteAll(userId);
+            app.logger.info('member forgotten by admin', { userId, removed, by: interaction.user.id });
+            return await interaction.editReply(
+                removed ? `🗑️ ユーザー \`${userId}\` の同意・トークン・取得情報をすべて削除しました。` : '該当ユーザーの記録はありませんでした。',
+            );
         }
 
         if (sub === 'rejoin') {

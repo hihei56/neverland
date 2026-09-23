@@ -73,7 +73,7 @@ function createWebServer({ config, consent, client, logger }) {
 <ul>
 <li>取得するもの: ${esc(items.join('、'))}、同意日時（トークン等は暗号化して保存）</li>
 <li>取得しないもの: メッセージ、参加サーバー一覧、DM</li>
-<li>いつでも <code>/privacy optout</code> または <code>/privacy delete</code> で取り消し・削除できます</li>
+<li>取り消しは Discord の「設定 > 認証済みアプリ」から連携解除でできます。削除の希望は運営者へご連絡ください</li>
 </ul>
 <p><a href="/privacy">プライバシーポリシー全文</a></p>
 <p>${btn}</p>`));
@@ -96,7 +96,7 @@ function createWebServer({ config, consent, client, logger }) {
                 }
                 return send(200, page('同意しました', `
 <h1>同意を記録しました</h1>
-<p>取り消しは Discord 上で <code>/privacy optout</code>、データ削除は <code>/privacy delete</code> で行えます（BotとのDMでも可）。</p>
+<p>取り消しは Discord の「設定 > 認証済みアプリ」から連携解除でできます。データ削除の希望は運営者へご連絡ください。</p>
 <p><a href="/privacy">プライバシーポリシー</a></p>`));
             }
 

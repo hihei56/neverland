@@ -8,7 +8,6 @@ const { BackupRepository } = require('./storage/backupRepository');
 const { ensureDirSync } = require('./storage/jsonFile');
 const { handleBackup } = require('./commands/backup');
 const { handleMembers } = require('./commands/members');
-const { handlePrivacy } = require('./commands/privacy');
 
 async function main() {
     const config = loadConfig();
@@ -71,7 +70,6 @@ async function main() {
         try {
             if (interaction.commandName === 'backup') return await handleBackup(interaction, app);
             if (interaction.commandName === 'members') return await handleMembers(interaction, app);
-            if (interaction.commandName === 'privacy') return await handlePrivacy(interaction, app);
         } catch (err) {
             logger.error('interaction failed', { command: interaction.commandName, error: err });
             const payload = { content: '❌ 予期しないエラーが発生しました。', flags: MessageFlags.Ephemeral };
