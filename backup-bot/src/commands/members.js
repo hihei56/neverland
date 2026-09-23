@@ -24,8 +24,9 @@ async function handleMembers(interaction, app) {
             const description = interaction.options.getString('description') || '荒らし対策用の認証です。ボタンから認証してください。';
             const useWebhook = interaction.options.getBoolean('webhook') ?? false;
             const senderName = (interaction.options.getString('sender_name') || title).slice(0, 80);
-            // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
-            const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${targetGuildId}`;
+            // ボタンは discord.com の認可URLを直接指す（永続リンク・state=guildId）。
+            // 自ドメインを経由しないので Discord の「外部サイトへ移動します」警告が出ない。
+            const url = app.consent.startAuthorization(targetGuildId);
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証開始！').setURL(url),
             );
