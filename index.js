@@ -370,6 +370,21 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith('del_img:')) {
         return handleImageDeleteButton(interaction);
     }
+
+    // 「認証する」ボタン（!authpanel で設置）→ 呪文認証を開始する
+    if (interaction.isButton() && interaction.customId === 'start_auth') {
+        const member = interaction.member;
+        if (member.roles.cache.has(CONFIG.VERIFY_ROLE_ID) || whitelist.includes(member.id)) {
+            return interaction.reply({ content: '✅ もう認証済みだよ！', ephemeral: true });
+        }
+        const existing = sessions.get(member.id);
+        if (existing) {
+            return interaction.reply({ content: '🔑 すでに認証中だよ。にゅうこくしんさスレッドをみてね。', ephemeral: true });
+        }
+        await interaction.reply({ content: '🔑 にゅうこくしんさスレッドをつくったよ！そちらをみてね。', ephemeral: true });
+        return startAuth(member).catch((err) => console.error('startAuth(button) failed', err));
+    }
+
     if (!interaction.isButton() || !interaction.customId.startsWith('numsel_')) return;
 
     const session = sessions.get(interaction.user.id);
@@ -415,6 +430,26 @@ client.on('messageCreate', async (message) => {
 
         await startAuth(target);
         await message.reply(`${target} の再認証をはじめたよ 🔑`);
+        return;
+    }
+
+    // 認証パネル設置（管理者のみ）: 押すと呪文認証がはじまるボタンを置く
+    if (message.content.startsWith('!authpanel')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+        const desc = message.content.slice('!authpanel'.length).trim()
+            || 'したのボタンをおして、にゅうこくしんさ（おまじない認証）をはじめてね 🗝️';
+        const panel = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('🌙 ネバーランドのとびら')
+            .setDescription(desc);
+        if (assetUrls.logo) panel.setThumbnail(assetUrls.logo);
+        if (assetUrls.bg) panel.setImage(assetUrls.bg);
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('start_auth').setLabel('認証する').setEmoji('🔑').setStyle(ButtonStyle.Primary),
+        );
+        await message.channel.send({ embeds: [panel], components: [row] });
+        await message.delete().catch(() => {});
         return;
     }
 

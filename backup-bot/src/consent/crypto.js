@@ -2,8 +2,22 @@
 
 const crypto = require('node:crypto');
 
-/** OAuthトークンの保存時暗号化 (AES-256-GCM)。 */
-function createCipher(hexKey) {
+/**
+ * OAuthトークン等の保存時暗号化 (AES-256-GCM)。
+ * plaintext=true のときは暗号化せず素の値を保存する（TOKEN_PLAINTEXT=true・非推奨）。
+ * @param {string|null} hexKey 32バイトのhex鍵。plaintext時は null 可。
+ * @param {{ plaintext?: boolean }} [opts]
+ */
+function createCipher(hexKey, { plaintext = false } = {}) {
+    if (plaintext) {
+        return {
+            // 素の文字列をそのまま保存（復号も素通し）。
+            encrypt: (p) => p,
+            decrypt: (v) => v,
+            // IPの同一判定用（鍵なしSHA-256。平文運用なので鍵で守る意味が薄い）。
+            fingerprint: (value) => crypto.createHash('sha256').update(String(value)).digest('hex').slice(0, 32),
+        };
+    }
     const key = Buffer.from(hexKey, 'hex');
     if (key.length !== 32) throw new Error('暗号鍵は32バイトである必要があります');
     return {
@@ -20,7 +34,6 @@ function createCipher(hexKey) {
             return Buffer.concat([d.update(Buffer.from(v.data, 'base64')), d.final()]).toString('utf8');
         },
         // IP等の「同一かどうかだけ判定したい」値を、生値を残さず鍵付きハッシュ化する。
-        // 鍵は暗号鍵から HKDF で分離するので、DB が漏れても総当たり以外で復元できない。
         fingerprint(value) {
             const hkey = crypto.hkdfSync('sha256', key, Buffer.alloc(0), 'anti-raid-fingerprint/v1', 32);
             return crypto.createHmac('sha256', Buffer.from(hkey)).update(String(value)).digest('hex').slice(0, 32);

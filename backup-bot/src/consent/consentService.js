@@ -198,6 +198,38 @@ class ConsentService {
         }));
     }
 
+    /**
+     * 管理者向け: 指定ユーザーの保存情報を復号して返す（生トークンは含めない）。
+     * email/connections/ipHash は荒らし対策で取得している場合のみ。
+     */
+    async describe(userId) {
+        return (await this.store.listByUser(userId)).map((r) => {
+            const info = {
+                guildId: r.guildId,
+                status: r.status,
+                consentedAt: r.consentedAt,
+                policyVersion: r.policyVersion,
+                scopes: r.scopes || [],
+                hasToken: Boolean(r.tokens),
+                tokenExpiresAt: r.tokens?.expiresAt ?? null,
+            };
+            if (r.profile) {
+                info.ipHash = r.profile.ipHash ?? null;
+                info.collectedAt = r.profile.collectedAt ?? null;
+                if (r.profile.enc) {
+                    try {
+                        const data = JSON.parse(this.cipher.decrypt(r.profile.enc));
+                        info.email = data.email ?? null;
+                        info.connections = data.connections ?? null;
+                    } catch (err) {
+                        this.logger.warn('describe: profile decrypt failed', { error: err });
+                    }
+                }
+            }
+            return info;
+        });
+    }
+
     async countActive(guildId) {
         return (await this.store.listActive(guildId)).length;
     }

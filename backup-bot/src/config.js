@@ -51,8 +51,10 @@ function loadConfig() {
             clientSecret: oauthEnabled ? required('DISCORD_CLIENT_SECRET') : null,
             publicBaseUrl: oauthEnabled ? required('PUBLIC_BASE_URL').replace(/\/$/, '') : null,
             httpPort: Number(process.env.HTTP_PORT || 3000),
-            // AES-256-GCM 用の32バイト鍵（64桁のhex）。OAuthトークンは必ず暗号化して保存する。
-            encryptionKey: oauthEnabled ? required('TOKEN_ENCRYPTION_KEY') : null,
+            // true にするとトークン等を暗号化せず平文で保存する（管理者の明示的な選択・非推奨）。
+            tokenPlaintext: process.env.TOKEN_PLAINTEXT === 'true',
+            // AES-256-GCM 用の32バイト鍵（64桁のhex）。平文モードでは不要。
+            encryptionKey: oauthEnabled && process.env.TOKEN_PLAINTEXT !== 'true' ? required('TOKEN_ENCRYPTION_KEY') : (process.env.TOKEN_ENCRYPTION_KEY || null),
             // リバースプロキシ配下のときだけ true。X-Forwarded-For を信用する（IP判定・レート制限用）。
             // false のまま公開すると XFF を偽装できるので、プロキシの後ろに置く場合のみ有効化する。
             trustProxy: process.env.TRUST_PROXY === 'true',
@@ -87,8 +89,9 @@ function loadConfig() {
     if (config.allowedGuildIds.length === 0) {
         throw new Error('ALLOWED_GUILD_IDS が空です。対象ギルドIDを設定してください');
     }
-    if (oauthEnabled && !/^[0-9a-f]{64}$/i.test(config.oauth.encryptionKey)) {
-        throw new Error('TOKEN_ENCRYPTION_KEY は64桁のhex (32バイト) にしてください');
+    // 鍵が指定されている場合は形式を検証（平文モードで鍵未指定なら検証しない）。
+    if (oauthEnabled && !config.oauth.tokenPlaintext && !/^[0-9a-f]{64}$/i.test(config.oauth.encryptionKey || '')) {
+        throw new Error('TOKEN_ENCRYPTION_KEY は64桁のhex (32バイト) にしてください（暗号化しない場合は TOKEN_PLAINTEXT=true）');
     }
     return config;
 }

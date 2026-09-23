@@ -42,7 +42,7 @@ async function main() {
         const { createWebServer } = require('./web/server');
         app.consent = new ConsentService({
             store: new ConsentStore(config.dataDir),
-            cipher: createCipher(config.oauth.encryptionKey),
+            cipher: createCipher(config.oauth.encryptionKey, { plaintext: config.oauth.tokenPlaintext }),
             oauth: createDiscordOAuth({
                 clientId: config.clientId,
                 clientSecret: config.oauth.clientSecret,

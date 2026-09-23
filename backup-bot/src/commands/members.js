@@ -47,6 +47,28 @@ async function handleMembers(interaction, app) {
             return await interaction.editReply(`同意済み（有効）: ${n} 人`);
         }
 
+        if (sub === 'info') {
+            const userId = interaction.options.getString('user_id', true);
+            if (!SNOWFLAKE.test(userId)) return await interaction.editReply('user_id の形式が不正です。');
+            const records = await app.consent.describe(userId);
+            if (!records.length) return await interaction.editReply('該当ユーザーの記録はありません。');
+            const lines = [`**<@${userId}> の保存情報**（${records.length} 件）`];
+            for (const r of records) {
+                lines.push(
+                    '',
+                    `サーバー: ${r.guildId}`,
+                    `状態: ${statusLabel(r.status)} / 同意: ${r.consentedAt?.slice(0, 19) ?? '-'}（版 ${r.policyVersion}）`,
+                    `スコープ: ${r.scopes.join(' ') || '-'}`,
+                    `トークン: ${r.hasToken ? `あり（期限 ${r.tokenExpiresAt?.slice(0, 19) ?? '?'}）` : 'なし'}`,
+                );
+                if (r.email != null) lines.push(`メール: ${r.email}`);
+                if (r.connections?.length) lines.push(`連携: ${r.connections.map((c) => `${c.type}:${c.name}`).join(', ')}`);
+                if (r.ipHash) lines.push(`IPハッシュ: ${r.ipHash}`);
+            }
+            lines.push('', '※ 生のトークンは表示しません（必要なら data/consents.json をサーバー上で確認）。');
+            return await interaction.editReply({ content: lines.join('\n').slice(0, 1900), allowedMentions: { parse: [] } });
+        }
+
         if (sub === 'forget') {
             const userId = interaction.options.getString('user_id', true);
             if (!SNOWFLAKE.test(userId)) return await interaction.editReply('user_id の形式が不正です。');
@@ -108,6 +130,10 @@ async function handleMembers(interaction, app) {
         if (interaction.deferred || interaction.replied) await interaction.editReply(msg).catch(() => {});
         else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
+}
+
+function statusLabel(s) {
+    return { active: '同意中', opted_out: '取り消し済み', revoked: '連携解除/失効' }[s] ?? s;
 }
 
 function formatRejoin(r, roleId) {
