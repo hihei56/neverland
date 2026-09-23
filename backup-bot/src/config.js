@@ -21,8 +21,23 @@ function required(name) {
     return v;
 }
 
+/** "guildId:roleId,guildId:roleId" → Map。任意設定なので空でも良い。 */
+function pairMap(name) {
+    const map = new Map();
+    for (const pair of list(name)) {
+        const [g, r] = pair.split(':').map((s) => s.trim());
+        if (/^\d{17,20}$/.test(g) && /^\d{17,20}$/.test(r)) map.set(g, r);
+    }
+    return map;
+}
+
 function loadConfig() {
     const oauthEnabled = process.env.OAUTH_ENABLED === 'true';
+    // strict: Web同意ページ + プライバシーポリシー掲示 + 明示チェック（既定）
+    // simple: DiscordのOAuth認可画面自体を同意とみなす軽量運用（RestoreCord風）。
+    //         どちらのモードでも オプトアウト/削除・参加先はALLOWED_GUILD_IDS限定・
+    //         トークン暗号化・レート制限 は必ず維持する。
+    const consentMode = process.env.CONSENT_MODE === 'simple' ? 'simple' : 'strict';
 
     const config = {
         token: required('DISCORD_TOKEN'),
@@ -39,11 +54,18 @@ function loadConfig() {
 
         oauth: {
             enabled: oauthEnabled,
+            mode: consentMode,
             clientSecret: oauthEnabled ? required('DISCORD_CLIENT_SECRET') : null,
             publicBaseUrl: oauthEnabled ? required('PUBLIC_BASE_URL').replace(/\/$/, '') : null,
             httpPort: Number(process.env.HTTP_PORT || 3000),
             // AES-256-GCM 用の32バイト鍵（64桁のhex）。OAuthトークンは必ず暗号化して保存する。
             encryptionKey: oauthEnabled ? required('TOKEN_ENCRYPTION_KEY') : null,
+        },
+        members: {
+            // 再参加/認証時に付与するロール（任意）。"guildId:roleId,..." 形式。
+            verifyRoleIds: pairMap('VERIFY_ROLE_IDS'),
+            // 再参加1件ごとの待機(ms)。レート制限を避けるための間隔。
+            joinDelayMs: Number(process.env.MEMBER_JOIN_DELAY_MS || 750),
         },
         privacy: {
             policyVersion: process.env.PRIVACY_POLICY_VERSION || '2026-09-23',
