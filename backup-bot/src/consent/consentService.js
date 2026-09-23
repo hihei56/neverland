@@ -4,6 +4,42 @@ const crypto = require('node:crypto');
 const { Routes } = require('discord.js');
 const { REQUIRED_SCOPES } = require('../models/consent');
 const { OAuthError } = require('./discordOAuth');
+const { sleep } = require('../util/queue');
+
+// これ以上続けても全員失敗するサーバー側の問題（招待停止・アカウント認証要求・不明なギルド）。
+// 参考: taka-4602/Discord-Backup-Bot の招待停止検知。
+const ABORT_CODES = new Set([40002, 400002, 10004]);
+
+/** guilds.join のエラーを種類に分類する。 */
+function classifyJoinError(err) {
+    const status = err?.status;
+    const code = err?.code;
+    if (ABORT_CODES.has(code)) return { kind: 'invite_stopped', abort: true };
+    if (status === 401) return { kind: 'token_invalid', retryable: true };
+    if (status === 403) {
+        if (code === 40007) return { kind: 'banned' };          // このサーバーからBAN済み
+        if (code === 10013) return { kind: 'account_deleted' };  // Unknown User（アカウント削除）
+        return { kind: 'token_invalid', retryable: true };       // トークン失効の可能性 → 再試行
+    }
+    if (status === 400) {
+        if (code === 30001) return { kind: 'guild_limit' };      // 参加サーバー数の上限(100)
+        return { kind: 'bad_request' };
+    }
+    if (status === 429 || err?.name === 'RateLimitError') return { kind: 'rate_limited' };
+    return { kind: 'error' };
+}
+
+function tallyFailure(result, c, logger, targetGuildId, err) {
+    switch (c.kind) {
+        case 'banned': result.banned++; break;
+        case 'account_deleted': result.accountDeleted++; break;
+        case 'guild_limit': result.guildLimit++; break;
+        case 'rate_limited': result.rateLimited++; break;
+        default:
+            result.failed++;
+            logger.error('rejoin failed', { targetGuildId, kind: c.kind, error: err });
+    }
+}
 
 /**
  * 同意の取得・オプトアウト・削除・同意済みメンバーの再参加をまとめる。
@@ -18,9 +54,11 @@ class ConsentService {
      * @param {string[]} deps.allowedGuildIds
      * @param {any} deps.logger
      */
-    constructor({ store, cipher, oauth, policyVersion, allowedGuildIds, logger, antiRaid = {} }) {
+    constructor({ store, cipher, oauth, policyVersion, allowedGuildIds, logger, antiRaid = {}, verifyRoleIds = new Map(), joinDelayMs = 0 }) {
         Object.assign(this, { store, cipher, oauth, policyVersion, logger });
         this.allowed = new Set(allowedGuildIds);
+        this.verifyRoleIds = verifyRoleIds; // guildId -> roleId（任意のロール付与）
+        this.joinDelayMs = joinDelayMs;
         // 荒らし対策の追加取得（すべて既定 false）。email/connections は追加スコープが必要。
         this.antiRaid = {
             collectEmail: Boolean(antiRaid.collectEmail),
@@ -156,57 +194,109 @@ class ConsentService {
 
     /**
      * 同意済みユーザーを targetGuild に参加させる（guilds.join）。
-     * sourceGuildId で同意したユーザーのみが対象。ロール付与は行わない。
-     * @returns {Promise<{ added: number, alreadyMember: number, revoked: number, failed: number }>}
+     * sourceGuildId で同意したユーザーのみが対象。
+     *
+     * - 失敗は種類ごとに分類する（参加済み/BAN/アカウント削除/参加上限/失効/レート制限 等）
+     * - 参加が失効/権限エラーで失敗したら1回だけリフレッシュして再試行する
+     * - サーバー側で招待が停止されている場合は全体を中断する
+     * - VERIFY_ROLE_IDS が設定されていれば参加後にロールを付与する
+     * @returns {Promise<RejoinResult>}
      */
     async rejoinMembers({ rest, queue, sourceGuildId, targetGuildId, onProgress }) {
         const records = await this.store.listActive(sourceGuildId);
-        const result = { added: 0, alreadyMember: 0, revoked: 0, failed: 0 };
+        const result = {
+            total: records.length, added: 0, alreadyMember: 0, banned: 0, accountDeleted: 0,
+            guildLimit: 0, revoked: 0, rateLimited: 0, failed: 0, roleAssigned: 0, roleFailed: 0,
+            aborted: null,
+        };
+        const roleId = this.verifyRoleIds.get(targetGuildId) || null;
+        const join = (userId, accessToken) =>
+            queue.add('guilds.join', () => rest.put(Routes.guildMember(targetGuildId, userId), { body: { access_token: accessToken } }));
+
         let i = 0;
         for (const r of records) {
             try {
-                const accessToken = await this.#validAccessToken(r);
+                let accessToken = await this.#validAccessToken(r);
                 if (!accessToken) {
                     result.revoked++;
                 } else {
-                    const res = await queue.add('guilds.join', () =>
-                        rest.put(Routes.guildMember(targetGuildId, r.userId), { body: { access_token: accessToken } }),
-                    );
-                    // 201 はメンバーJSON(新規参加)、204 は既に参加済み（本文なし→空のArrayBuffer）
+                    let res;
+                    try {
+                        res = await join(r.userId, accessToken);
+                    } catch (err) {
+                        const c = classifyJoinError(err);
+                        if (c.abort) {
+                            // サーバー側の招待停止など。これ以上続けても全員失敗するので中断。
+                            result.aborted = c.kind;
+                            this.logger.warn('rejoin aborted', { targetGuildId, reason: c.kind });
+                            break;
+                        }
+                        if (c.retryable) {
+                            // トークン失効の可能性 → 強制リフレッシュして1回だけ再試行
+                            accessToken = await this.#validAccessToken(r, true);
+                            if (!accessToken) {
+                                result.revoked++;
+                                onProgress?.(++i, records.length);
+                                continue;
+                            }
+                            res = await join(r.userId, accessToken).catch((err2) => {
+                                tallyFailure(result, classifyJoinError(err2), this.logger, targetGuildId, err2);
+                                return undefined;
+                            });
+                            if (res === undefined) { onProgress?.(++i, records.length); continue; }
+                        } else {
+                            tallyFailure(result, c, this.logger, targetGuildId, err);
+                            onProgress?.(++i, records.length);
+                            continue;
+                        }
+                    }
+                    // 201 はメンバーJSON(新規参加)、204 は既に参加済み（本文なし）
                     if (res && typeof res === 'object' && 'user' in res) {
                         result.added++;
                         await this.store.recordEvent(r, 'rejoined');
                     } else {
                         result.alreadyMember++;
                     }
+                    if (roleId) await this.#assignRole(rest, queue, targetGuildId, r.userId, roleId, result);
                 }
             } catch (err) {
                 result.failed++;
                 this.logger.error('rejoin failed', { targetGuildId, error: err });
             }
             onProgress?.(++i, records.length);
+            if (this.joinDelayMs > 0) await sleep(this.joinDelayMs);
         }
         return result;
     }
 
-    async #validAccessToken(record) {
+    async #assignRole(rest, queue, guildId, userId, roleId, result) {
+        try {
+            await queue.add('add-role', () => rest.put(Routes.guildMemberRole(guildId, userId, roleId), { reason: 'Rejoin verify role' }));
+            result.roleAssigned++;
+        } catch (err) {
+            result.roleFailed++;
+            this.logger.warn('role assign failed', { guildId, roleId, error: err });
+        }
+    }
+
+    async #validAccessToken(record, force = false) {
         if (!record.tokens) return null;
-        if (!needsRefresh(record.tokens)) return this.cipher.decrypt(record.tokens.accessToken);
+        if (!force && !needsRefresh(record.tokens)) return this.cipher.decrypt(record.tokens.accessToken);
         // 同じユーザーの更新は1本にまとめる（同時に更新すると片方が invalid_grant になるため）
         const key = `${record.userId}:${record.guildId}`;
         let pending = this.refreshing.get(key);
         if (!pending) {
-            pending = this.#refresh(record.userId, record.guildId).finally(() => this.refreshing.delete(key));
+            pending = this.#refresh(record.userId, record.guildId, force).finally(() => this.refreshing.delete(key));
             this.refreshing.set(key, pending);
         }
         return pending;
     }
 
-    async #refresh(userId, guildId) {
+    async #refresh(userId, guildId, force = false) {
         // 他の処理が先に更新している可能性があるので、保存済みの最新状態から始める
         const latest = await this.store.get(userId, guildId);
         if (!latest?.tokens || latest.status !== 'active') return null;
-        if (!needsRefresh(latest.tokens)) return this.cipher.decrypt(latest.tokens.accessToken);
+        if (!force && !needsRefresh(latest.tokens)) return this.cipher.decrypt(latest.tokens.accessToken);
 
         const used = latest.tokens.refreshToken;
         try {

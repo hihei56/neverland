@@ -52,6 +52,8 @@ async function main() {
             policyVersion: config.privacy.policyVersion,
             allowedGuildIds: config.allowedGuildIds,
             antiRaid: config.antiRaid,
+            verifyRoleIds: config.members.verifyRoleIds,
+            joinDelayMs: config.members.joinDelayMs,
             logger,
         });
         web = createWebServer({ config, consent: app.consent, client, logger });
