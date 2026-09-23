@@ -20,24 +20,27 @@ async function handleMembers(interaction, app) {
                 return await interaction.reply({ content: '⛔ for_guild が ALLOWED_GUILD_IDS に含まれていません。', flags: MessageFlags.Ephemeral });
             }
             const targetName = interaction.client.guilds.cache.get(targetGuildId)?.name || `サーバー ${targetGuildId}`;
-          // Discord 認可 URL を直接ボタンに埋め込む（外部ドメイン警告を避ける）。state は 24h 有効。
+            // Discord 認可 URL を直接ボタンに埋め込む（外部ドメイン警告を避ける）。state は 24h 有効。
             const url = app.consent.directAuthorizeUrl(targetGuildId);
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証開始！').setURL(url),
             );
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
-                .setTitle(`kibicord VERIFY`)
+                .setTitle(`${targetName} VERIFY`)
                 .setDescription('荒らし対策用の認証です。ボタンから認証してください。')
-                .setFooter({ text: ` プライバシー: ${app.config.oauth.publicBaseUrl}/privacy` });
-            // 強制・報酬付与はしないこと（任意の認証であることを明記）。
-            return await interaction.reply({
+                .setFooter({ text: `任意 ・ プライバシー: ${app.config.oauth.publicBaseUrl}/privacy` });
+
+            // 実行者を隠すため、ephemeral で ACK → 通常メッセージとして投稿
+            await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+            await interaction.channel.send({
                 embeds: [embed],
                 components: [row],
                 allowedMentions: { parse: [] },
             });
+            await interaction.editReply({ content: '✅ 認証パネルを投稿しました。' });
+            return;
         }
-
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
         if (sub === 'stats') {
