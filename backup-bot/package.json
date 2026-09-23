@@ -1,0 +1,19 @@
+{
+  "name": "guild-settings-backup-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "自分が管理するDiscordサーバー向けの設定バックアップ/復元Bot（公式Bot APIのみ）",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "register": "node src/scripts/registerCommands.js",
+    "test": "node --test test/*.test.js"
+  },
+  "engines": {
+    "node": ">=20.11"
+  },
+  "dependencies": {
+    "discord.js": "^14.27.0",
+    "dotenv": "^16.6.1"
+  }
+}
