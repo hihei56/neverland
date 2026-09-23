@@ -52,10 +52,11 @@ backup-bot/
 
 ## セットアップ
 
-1. Developer Portal でアプリを作る。特権インテント（Server Members / Message Content）は **不要** なので OFF のままにする
+1. Developer Portal でアプリを作る。**MESSAGE CONTENT INTENT を ON** にする（NGワード/連投スパムの検知にメッセージ本文が必要）。Server Members は不要
 2. Bot を招待する。招待 URL の scope は `bot applications.commands`。必要な権限は次のとおり
    - Manage Roles, Manage Channels, Manage Guild, Manage Expressions, Manage Webhooks, View Channels
    - 再参加機能を使う場合は Create Instant Invite も必要
+   - モデレーション: NGワード削除に Manage Messages、連投スパム処罰に Moderate Members（タイムアウト）と Kick Members
    - Bot のロールは、復元で作るロールより **上** に置く
 3. `.env.example` を `.env` にコピーして値を設定する
 4. 次を実行する
@@ -129,6 +130,19 @@ npm test
 
 - `VERIFY_COLLECT_EMAIL` / `VERIFY_COLLECT_CONNECTIONS`：メール・連携アカウントを暗号化保存
 - `VERIFY_LOG_IP`：認証時の IP を HMAC ハッシュで記録（同一 IP の複数アカウント検出用。生 IP は残さない）／`VERIFY_LOG_IP_RAW` で生 IP を暗号化保存
+
+## モデレーション（簡略版）
+
+`moderator.js` から核となる機能を移植したものです（コマンドは管理者限定）。適用対象ロールは設定でき、**初期は全員（@everyone）**に適用します。管理者・メッセージ管理権限を持つ人は常に対象外です。
+
+- `/moderation show`：現在の設定
+- `/moderation toggle enabled:True|False`：**NGワード自動削除**の有効/無効
+- `/moderation spam enabled:True|False`：**連投スパムの累進処罰**（4秒2通で連投判定 → 削除 → タイムアウトを段階的に延長 → 最終キック、違反は14日記憶）の有効/無効
+- `/moderation target-add role:@X`：適用対象ロールを追加（追加するとそのロール保持者だけが対象）。`@everyone` を指定すると全員に戻る
+- `/moderation target-clear`：適用対象を全員に戻す
+- `/moderation ngword action:add|remove|list word:...`：NGワードの管理
+
+必要な権限は「セットアップ」を参照（Message Content インテント＋Manage Messages／Moderate Members／Kick Members）。
 
 ## レート制限とエラー
 

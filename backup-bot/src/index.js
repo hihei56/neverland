@@ -8,15 +8,24 @@ const { BackupRepository } = require('./storage/backupRepository');
 const { ensureDirSync } = require('./storage/jsonFile');
 const { handleBackup } = require('./commands/backup');
 const { handleMembers } = require('./commands/members');
+const { handleModeration } = require('./commands/moderation');
+const { ModerationStore } = require('./moderation/moderationStore');
+const { handleMessage: handleModerationMessage } = require('./moderation/moderator');
+const { createFloodTracker, StrikeStore, enforce: enforceSpam } = require('./moderation/spamEnforcer');
 
 async function main() {
     const config = loadConfig();
     const logger = createLogger({ logDir: config.logDir });
     ensureDirSync(config.dataDir);
 
-    // Guilds インテントのみ。メッセージ内容・メンバー一覧（特権インテント）は使わない。
+    // NGワード自動削除のため、メッセージ内容（特権インテント）も受け取る。
+    // ※ Developer Portal で MESSAGE CONTENT INTENT を有効にすること。
     const client = new Client({
-        intents: [GatewayIntentBits.Guilds],
+        intents: [
+            GatewayIntentBits.Guilds,
+            GatewayIntentBits.GuildMessages,
+            GatewayIntentBits.MessageContent,
+        ],
         rest: { retries: 3, timeout: 30_000 },
     });
 
@@ -30,6 +39,9 @@ async function main() {
         client,
         repo: new BackupRepository(config.dataDir),
         queue: new TaskQueue({ intervalMs: config.queueIntervalMs, logger }),
+        moderationStore: new ModerationStore(config.dataDir),
+        flood: createFloodTracker(),
+        strikes: new StrikeStore(config.dataDir),
         consent: null,
     };
 
@@ -72,11 +84,24 @@ async function main() {
         try {
             if (interaction.commandName === 'backup') return await handleBackup(interaction, app);
             if (interaction.commandName === 'members') return await handleMembers(interaction, app);
+            if (interaction.commandName === 'moderation') return await handleModeration(interaction, app);
         } catch (err) {
             logger.error('interaction failed', { command: interaction.commandName, error: err });
             const payload = { content: '❌ 予期しないエラーが発生しました。', flags: MessageFlags.Ephemeral };
             if (interaction.deferred || interaction.replied) await interaction.editReply(payload.content).catch(() => {});
             else await interaction.reply(payload).catch(() => {});
+        }
+    });
+
+    // NGワード自動削除（許可ギルドのみ・設定は /moderation）
+    client.on(Events.MessageCreate, async (message) => {
+        try {
+            await handleModerationMessage(message, {
+                store: app.moderationStore, allowedGuildIds: config.allowedGuildIds, logger,
+                flood: app.flood, strikes: app.strikes, enforce: enforceSpam,
+            });
+        } catch (err) {
+            logger.warn('moderation message handler failed', { error: err });
         }
     });
 

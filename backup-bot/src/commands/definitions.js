@@ -41,8 +41,27 @@ const members = new SlashCommandBuilder()
         .addStringOption((o) => o.setName('user_id').setDescription('対象ユーザーID').setRequired(true))
         .addStringOption((o) => o.setName('confirm').setDescription('確認のため user_id をもう一度入力').setRequired(true)));
 
+// 簡略化モデレーション（NGワード自動削除）。適用ロールを設定、初期は全員。
+const moderation = new SlashCommandBuilder()
+    .setName('moderation')
+    .setDescription('NGワード自動削除の設定（管理者用）')
+    .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
+    .setContexts(InteractionContextType.Guild)
+    .addSubcommand((s) => s.setName('show').setDescription('現在の設定を表示'))
+    .addSubcommand((s) => s.setName('toggle').setDescription('NGワード削除の有効/無効を切り替え')
+        .addBooleanOption((o) => o.setName('enabled').setDescription('true で有効').setRequired(true)))
+    .addSubcommand((s) => s.setName('spam').setDescription('連投スパムの累進処罰（削除→タイムアウト→キック）の有効/無効')
+        .addBooleanOption((o) => o.setName('enabled').setDescription('true で有効').setRequired(true)))
+    .addSubcommand((s) => s.setName('target-add').setDescription('適用対象ロールを追加（追加するとそのロール保持者のみ対象）')
+        .addRoleOption((o) => o.setName('role').setDescription('対象ロール').setRequired(true)))
+    .addSubcommand((s) => s.setName('target-clear').setDescription('適用対象ロールを全解除（＝全員に適用）'))
+    .addSubcommand((s) => s.setName('ngword').setDescription('NGワードの追加/削除/一覧')
+        .addStringOption((o) => o.setName('action').setDescription('操作').setRequired(true)
+            .addChoices({ name: 'add', value: 'add' }, { name: 'remove', value: 'remove' }, { name: 'list', value: 'list' }))
+        .addStringOption((o) => o.setName('word').setDescription('対象の語（add/remove時）').setMaxLength(100)));
+
 module.exports = {
-    guildCommands: [backup.toJSON(), members.toJSON()],
+    guildCommands: [backup.toJSON(), members.toJSON(), moderation.toJSON()],
     // 本人向けのグローバルコマンドは廃止（コマンドは管理者限定）。
     // 利用者は Discord「認証済みアプリ」から連携解除でき、削除は運営者へ依頼する（プライバシーポリシー参照）。
     globalCommands: [],
