@@ -111,18 +111,43 @@ test('40002 は中断コードに含めない（過剰中断しない）', async
     assert.equal(calls, 2); // 中断せず全件処理
 });
 
-test('VERIFY_ROLE_IDS 設定時は参加後にロールを付与する', async () => {
+test('新規参加はロールを body に入れて1回のAPIで付与する（RestoreCord方式）', async () => {
     const t = await setup({ verifyRoleIds: new Map([[TGT, '900000000000000009']]) });
     await t.add('400000000000000001');
-    const puts = [];
-    const rest = { put: async (route) => {
-        puts.push(route);
-        return route.includes('/roles/') ? undefined : { user: { id: 'x' } };
-    } };
+    const calls = [];
+    const rest = { put: async (route, opts) => { calls.push({ route, body: opts.body }); return { user: { id: 'x' } }; } };
     const r = await t.run(rest);
     assert.equal(r.added, 1);
     assert.equal(r.roleAssigned, 1);
-    assert.ok(puts.some((p) => p === Routes.guildMemberRole(TGT, '400000000000000001', '900000000000000009')));
+    // 参加+ロールが1回のPUTで、別のロール付与呼び出しは無い
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0].body.roles, ['900000000000000009']);
+    assert.ok(!calls.some((c) => c.route.includes('/roles/')));
+});
+
+test('既に参加済み(204)のメンバーには個別にロールを付与する', async () => {
+    const t = await setup({ verifyRoleIds: new Map([[TGT, '900000000000000009']]) });
+    await t.add('400000000000000001');
+    const calls = [];
+    const rest = { put: async (route) => { calls.push(route); return route.includes('/roles/') ? undefined : null; } };
+    const r = await t.run(rest); // null = 204 相当（already member）
+    assert.equal(r.alreadyMember, 1);
+    assert.equal(r.roleAssigned, 1);
+    assert.ok(calls.some((p) => p === Routes.guildMemberRole(TGT, '400000000000000001', '900000000000000009')));
+});
+
+test('ロール付きで参加が失敗したら、ロール無しで参加だけは通す', async () => {
+    const t = await setup({ verifyRoleIds: new Map([[TGT, '900000000000000009']]) });
+    await t.add('400000000000000001');
+    const rest = { put: async (route, opts) => {
+        if (route.includes('/roles/')) throw apiError(403, 50013);         // 個別ロール付与も失敗
+        if (opts.body.roles) throw apiError(403, 50013);                   // ロール付き参加は失敗
+        return { user: { id: 'x' } };                                     // ロール無し参加は成功
+    } };
+    const r = await t.run(rest);
+    assert.equal(r.added, 1);      // 参加は成立
+    assert.equal(r.roleFailed, 1); // ロールだけ失敗
+    assert.equal(r.failed, 0);
 });
 
 test('リフレッシュが invalid_grant なら revoked に数え、参加を試みない', async () => {

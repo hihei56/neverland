@@ -220,8 +220,12 @@ class ConsentService {
             roleAssigned: 0, roleFailed: 0, aborted: null,
         };
         const roleId = this.verifyRoleIds.get(targetGuildId) || null;
-        const join = (userId, accessToken) =>
-            queue.add('guilds.join', () => rest.put(Routes.guildMember(targetGuildId, userId), { body: { access_token: accessToken } }));
+        // RestoreCord に倣い、新規参加はロールを body に入れて1回のAPIで済ませる。
+        // ただしロールが原因で参加ごと失敗しないよう、失敗時はロール無しで参加だけ通す。
+        const join = (userId, accessToken, withRole) =>
+            queue.add('guilds.join', () => rest.put(Routes.guildMember(targetGuildId, userId), {
+                body: { access_token: accessToken, ...(withRole && roleId ? { roles: [roleId] } : {}) },
+            }));
 
         let i = 0;
         for (const r of records) {
@@ -231,25 +235,37 @@ class ConsentService {
                     result.revoked++;
                 } else {
                     let res;
+                    let roleViaBody = Boolean(roleId);
+                    let joinErr = null;
                     try {
-                        res = await join(r.userId, accessToken);
+                        res = await join(r.userId, accessToken, true);
                     } catch (err) {
-                        const c = classifyJoinError(err);
+                        // ロール付きで失敗 → ロール無しで参加だけ試す（ロールで参加を落とさない）
+                        if (roleId) {
+                            res = await join(r.userId, accessToken, false).catch((e) => { joinErr = e; return undefined; });
+                            roleViaBody = false;
+                            if (res !== undefined) joinErr = null;
+                        } else {
+                            joinErr = err;
+                        }
+                    }
+                    if (joinErr) {
+                        const c = classifyJoinError(joinErr);
                         if (c.abort) {
-                            // サーバー側の招待停止など。これ以上続けても全員失敗するので中断。
                             result.aborted = c.kind;
                             this.logger.warn('rejoin aborted', { targetGuildId, reason: c.kind });
                             break;
                         }
                         if (c.retryable) {
-                            // トークン失効の可能性 → 強制リフレッシュして1回だけ再試行
+                            // トークン失効の可能性 → 強制リフレッシュしてロール無しで1回だけ再試行
                             accessToken = await this.#validAccessToken(r, true);
                             if (!accessToken) {
                                 result.revoked++;
                                 onProgress?.(++i, records.length);
                                 continue;
                             }
-                            res = await join(r.userId, accessToken).catch(async (err2) => {
+                            roleViaBody = false;
+                            res = await join(r.userId, accessToken, false).catch(async (err2) => {
                                 const c2 = classifyJoinError(err2);
                                 tallyFailure(result, c2, this.logger, targetGuildId, err2);
                                 await this.#markIfDead(r, c2);
@@ -257,20 +273,25 @@ class ConsentService {
                             });
                             if (res === undefined) { onProgress?.(++i, records.length); continue; }
                         } else {
-                            tallyFailure(result, c, this.logger, targetGuildId, err);
+                            tallyFailure(result, c, this.logger, targetGuildId, joinErr);
                             await this.#markIfDead(r, c);
                             onProgress?.(++i, records.length);
                             continue;
                         }
                     }
                     // 201 はメンバーJSON(新規参加)、204 は既に参加済み（本文なし）
-                    if (res && typeof res === 'object' && 'user' in res) {
+                    const isNewJoin = res && typeof res === 'object' && 'user' in res;
+                    if (isNewJoin) {
                         result.added++;
                         await this.store.recordEvent(r, 'rejoined');
                     } else {
                         result.alreadyMember++;
                     }
-                    if (roleId) await this.#assignRole(rest, queue, targetGuildId, r.userId, roleId, result);
+                    if (roleId) {
+                        // 新規参加で body 付与済みならそれで完了。既存メンバーや body 未付与は個別に付与。
+                        if (isNewJoin && roleViaBody) result.roleAssigned++;
+                        else await this.#assignRole(rest, queue, targetGuildId, r.userId, roleId, result);
+                    }
                 }
             } catch (err) {
                 result.failed++;
