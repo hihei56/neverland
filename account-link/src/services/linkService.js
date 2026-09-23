@@ -5,7 +5,7 @@
 // 原則:
 //   - 本人が同意画面でチェックを入れ、さらに Discord の認可画面で許可した場合だけ取得する
 //   - 取得に失敗した・スコープが足りない場合は、トークンを失効させて何も保存しない
-//   - 本人確認（/me の閲覧・撤回・削除）には identify だけの別フローを使い、そのトークンは保存しない
+//   - 本人確認（/me の閲覧・撤回）には identify だけの別フローを使い、そのトークンは保存しない
 
 const { randomToken } = require('../crypto');
 const { DiscordApiError } = require('../discord/client');
@@ -100,7 +100,7 @@ class LinkService {
         }
     }
 
-    // ---- 本人向け: 閲覧・撤回・削除 ------------------------------------
+    // ---- 本人向け: 閲覧・撤回 ------------------------------------------
 
     /** 本人に見せる保存データ（復号済み）。 */
     async view(userId) {
@@ -133,8 +133,11 @@ class LinkService {
         return true;
     }
 
-    /** 削除: レコードを完全に削除する。purgeLog=true なら仮名化された同意ログも消す。 */
-    async delete(userId, { actor = 'user', purgeLog = false } = {}) {
+    /**
+     * 削除（管理者専用・運営者 CLI からのみ呼ぶ）: レコードを完全に削除する。
+     * purgeLog=true なら仮名化された同意ログも消す。
+     */
+    async delete(userId, { actor = 'operator', purgeLog = false } = {}) {
         const r = await this.users.get(userId);
         if (r) await this.#revokeRecord(r);
         const existed = await this.users.remove(userId);

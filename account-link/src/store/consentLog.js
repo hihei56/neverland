@@ -5,7 +5,7 @@
 // 各行: { at, subject, event, policyVersion, scopes?, actor }
 //   subject は HMAC(userId) による仮名ID。email・ユーザー名・IP は記録しない。
 //   ユーザーデータを削除した後も「いつ同意し、いつ撤回/削除したか」の証跡だけが残る。
-//   ログ自体の削除依頼には CLI の `delete --purge-log` で対応する。
+//   ログ自体の削除依頼には 管理者が CLI の `delete <userId> --yes --purge-log` で対応する。
 //
 // event:
 //   consent_granted   本人が同意し、データを取得した

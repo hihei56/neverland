@@ -5,7 +5,7 @@
 //   node src/cli.js list                        一覧（ユーザーID・状態・同意日時のみ。email は表示しない）
 //   node src/cli.js show <userId>               保存データを表示（閲覧したことを同意ログに記録）
 //   node src/cli.js optout <userId>             本人の依頼で同意を撤回として処理
-//   node src/cli.js delete <userId> [--purge-log]  本人の依頼でデータを削除（--purge-log で同意ログも削除）
+//   node src/cli.js delete <userId> --yes [--purge-log]  データを削除（管理者専用。--purge-log で同意ログも削除）
 //   node src/cli.js refresh <userId>            保存済みトークンでデータを再取得
 //   node src/cli.js purge-expired               保存期間を過ぎたデータを削除
 //   node src/cli.js log <userId>                同意ログ（仮名ID）を表示
@@ -42,6 +42,8 @@ async function main() {
         case 'optout':
             return console.log((await service.optOut(needUser(), { actor: 'operator' })) ? '撤回として処理しました' : '対象がありません');
         case 'delete': {
+            needUser();
+            if (!flags.includes('--yes')) throw new Error('削除は取り消せません。実行するには --yes を付けてください');
             const purgeLog = flags.includes('--purge-log');
             const existed = await service.delete(needUser(), { actor: 'operator', purgeLog });
             return console.log(existed ? `削除しました${purgeLog ? '（同意ログも削除）' : ''}` : 'データはありませんでした');
@@ -53,7 +55,7 @@ async function main() {
         case 'log':
             return console.table(await service.log.entriesFor(needUser()));
         default:
-            console.log('usage: node src/cli.js <gen-key|list|show|optout|delete|refresh|purge-expired|log> [userId] [--purge-log]');
+            console.log('usage: node src/cli.js <gen-key|list|show|optout|delete|refresh|purge-expired|log> [userId] [--yes] [--purge-log]');
             process.exitCode = 1;
     }
 }

@@ -31,8 +31,9 @@
 
 - `identify` だけで本人確認する。このときのトークンはすぐに失効させ、保存しない
 - 保存データの閲覧（開示）
-- 同意の撤回
-- 全削除
+- 同意の撤回（email・connections・トークンはこの操作で本人がすぐに消去できる）
+
+**削除は管理者専用です。** Web には削除用のエンドポイントがなく、運営者 CLI の `delete` でだけ削除できます。ユーザーIDを含めた完全な削除を本人が希望する場合は、連絡先（`PRIVACY_CONTACT`）から依頼してもらい、管理者が実行します。
 
 ## セキュリティとプライバシー
 
@@ -54,11 +55,11 @@
 
 ## 撤回と削除の違い
 
-| 操作 | トークン | email / connections | ユーザーID | 同意ログ |
+| 操作（実行できる人） | トークン | email / connections | ユーザーID | 同意ログ |
 |---|---|---|---|---|
-| 撤回（オプトアウト） | 失効させて破棄 | 消去 | 撤回記録として残す | `opted_out` を追記 |
-| 削除 | 失効させて破棄 | 消去 | 消去 | `deleted` を追記（仮名ID） |
-| 削除（`--purge-log`） | 失効させて破棄 | 消去 | 消去 | 同意ログも削除 |
+| 撤回（本人: `/me`、管理者: CLI `optout`） | 失効させて破棄 | 消去 | 撤回記録として残す | `opted_out` を追記 |
+| 削除（管理者のみ: CLI `delete --yes`） | 失効させて破棄 | 消去 | 消去 | `deleted` を追記（仮名ID） |
+| 削除（管理者のみ: `--yes --purge-log`） | 失効させて破棄 | 消去 | 消去 | 同意ログも削除 |
 
 本人が Discord の「認証済みアプリ」から連携を解除した場合、次に `refresh` したときに `invalid_grant` が返るので、撤回として処理します。
 
@@ -75,13 +76,15 @@ npm test
 
 Developer Portal の OAuth2 > Redirects に `${PUBLIC_BASE_URL}/callback` を登録してください。本番では HTTPS のリバースプロキシの後ろに置いてください。
 
-## 運営者 CLI
+## 運営者 CLI（管理者専用）
+
+CLI はサーバー上で `.env`（`MASTER_KEY`）にアクセスできる管理者だけが実行できます。
 
 ```bash
 node src/cli.js list                        # ユーザーID・状態・同意日時（email は表示しない）
 node src/cli.js show <userId>               # 保存データを表示（閲覧したことを同意ログに記録）
 node src/cli.js optout <userId>             # メールなどで撤回の依頼を受けたとき
-node src/cli.js delete <userId> [--purge-log]
+node src/cli.js delete <userId> --yes [--purge-log]   # 削除（取り消せないため --yes が必須）
 node src/cli.js refresh <userId>            # 保存済みトークンでデータを再取得
 node src/cli.js purge-expired
 node src/cli.js log <userId>                # 同意ログ

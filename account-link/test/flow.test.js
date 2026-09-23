@@ -114,7 +114,7 @@ test('state 検証: 不一致・再利用・Cookie なしは拒否', async () =>
     } finally { await t.close(); }
 });
 
-test('同意 → 取得・暗号化保存 → 閲覧 → 撤回 → 削除', async () => {
+test('同意 → 取得・暗号化保存 → 閲覧 → 撤回 → 管理者による削除', async () => {
     const t = await setup();
     try {
         const state = await startLink(t);
@@ -146,11 +146,17 @@ test('同意 → 取得・暗号化保存 → 閲覧 → 撤回 → 削除', asy
         assert.equal(after.profile, null);
         assert.equal(after.hasToken, false);
 
-        // 削除: 確認なしは拒否、確認ありで完全削除
-        assert.equal((await t.req('POST', '/me/delete', { csrf: t.csrf })).status, 400);
-        assert.equal((await t.req('POST', '/me/delete', { csrf: t.csrf, confirm: 'yes' })).status, 200);
+        // 削除は管理者専用: Web からは削除できない
+        assert.equal((await t.req('POST', '/me/delete', { csrf: t.csrf, confirm: 'yes' })).status, 404);
+        assert.doesNotMatch((await t.req('GET', '/me')).text, /action="\/me\/delete"/);
+        assert.notEqual(await t.service.view(USER), null);
+
+        // 管理者（運営者 CLI と同じ経路）による削除
+        assert.equal(await t.service.delete(USER), true);
         assert.equal(await t.service.view(USER), null);
-        assert.deepEqual(readLog(t.dataDir).map((e) => e.event), ['consent_granted', 'opted_out', 'deleted']);
+        const finalLog = readLog(t.dataDir);
+        assert.deepEqual(finalLog.map((e) => e.event), ['consent_granted', 'opted_out', 'deleted']);
+        assert.equal(finalLog.at(-1).actor, 'operator');
     } finally { await t.close(); }
 });
 
@@ -207,5 +213,24 @@ test('purgeExpired: 保存期間を過ぎたレコードを削除', async () => 
         assert.equal(await t.service.purgeExpired(Date.now()), 0);
         assert.equal(await t.service.purgeExpired(Date.now() + 366 * 86_400_000), 1);
         assert.equal(await t.service.view(USER), null);
+    } finally { await t.close(); }
+});
+
+test('CLI delete: --yes が無ければ削除しない', async () => {
+    const t = await setup();
+    try {
+        const state = await startLink(t);
+        await t.req('GET', `/callback?code=c5&state=${state}`);
+        const { spawnSync } = require('node:child_process');
+        const env = {
+            ...process.env, DOTENV_PATH: '/nonexistent', PUBLIC_BASE_URL: 'http://localhost', MASTER_KEY: t.config.masterKey,
+            APP_PURPOSE: 'p', OPERATOR_NAME: 'o', PRIVACY_CONTACT: 'c', DISCORD_CLIENT_ID: '1', DISCORD_CLIENT_SECRET: 's',
+            DATA_DIR: t.dataDir, LOG_DIR: path.join(t.dataDir, 'logs'),
+        };
+        const cli = path.join(__dirname, '..', 'src', 'cli.js');
+        const r = spawnSync(process.execPath, [cli, 'delete', USER], { env, encoding: 'utf8' });
+        assert.notEqual(r.status, 0);
+        assert.match(r.stderr, /--yes/);
+        assert.notEqual(await t.service.view(USER), null);
     } finally { await t.close(); }
 });

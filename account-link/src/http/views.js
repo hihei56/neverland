@@ -42,7 +42,8 @@ function landingPage({ app, csrf }) {
 <h2>あなたの権利</h2>
 <ul>
 <li>連携は<strong>任意</strong>です。連携しなくても不利益はありません。</li>
-<li><a href="/me">自分のデータ</a>から、いつでも内容の確認・同意の撤回・全削除ができます。</li>
+<li><a href="/me">自分のデータ</a>から、いつでも内容の確認と同意の撤回ができます。撤回するとメールアドレス・連携アカウント情報・トークンは消去されます。</li>
+<li>ユーザーIDを含む完全な削除は、運営者（${esc(app.contact)}）に依頼してください。</li>
 </ul>
 <form method="post" action="/link" class="box">
 ${csrfField(csrf)}
@@ -66,12 +67,12 @@ function messagePage(title, message, { status = 200 } = {}) {
 function loginPage() {
     return layout('本人確認', `
 <h1>自分のデータ</h1>
-<p>保存されているデータの確認・同意の撤回・削除を行うには、Discord で本人確認をしてください。</p>
+<p>保存されているデータの確認や同意の撤回を行うには、Discord で本人確認をしてください。</p>
 <p class="muted">本人確認ではユーザーID（<code>identify</code>）だけを使い、そのトークンはすぐに失効させます。何も保存しません。</p>
 <p><a href="/me/login"><button type="button">Discord で本人確認</button></a></p>`);
 }
 
-function mePage({ data, csrf }) {
+function mePage({ data, csrf, app }) {
     if (!data) {
         return layout('自分のデータ', `<h1>自分のデータ</h1><p>保存されているデータはありません。</p>
 <form method="post" action="/me/logout">${csrfField(csrf)}<button class="plain">ログアウト</button></form>`);
@@ -102,11 +103,8 @@ ${data.status === 'active' ? `
 <form method="post" action="/me/optout" class="box">${csrfField(csrf)}
 <p>トークンを失効させ、メールアドレスと連携アカウント情報を消去します。ユーザーIDと撤回日時だけを記録として残します。</p>
 <button>同意を撤回する</button></form>` : ''}
-<h2>すべて削除</h2>
-<form method="post" action="/me/delete" class="box">${csrfField(csrf)}
-<p>ユーザーIDを含む保存データをすべて削除します。この操作は取り消せません。</p>
-<label><input type="checkbox" name="confirm" value="yes" required> 削除することを確認しました</label>
-<button class="danger">すべて削除する</button></form>
+<h2>完全な削除</h2>
+<div class="box"><p>ユーザーIDを含むすべての記録の削除は、運営者が行います。<br>連絡先: ${esc(app.contact)}</p></div>
 <form method="post" action="/me/logout">${csrfField(csrf)}<button class="plain">ログアウト</button></form>`);
 }
 

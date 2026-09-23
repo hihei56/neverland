@@ -8,9 +8,10 @@
 //   GET  /me           本人のデータ閲覧（本人確認済みのとき）
 //   GET  /me/login     本人確認 (identify のみ・トークンは保存しない)
 //   POST /me/optout    同意の撤回
-//   POST /me/delete    全削除
 //   POST /me/logout
 //   GET  /healthz
+//
+// データの削除は管理者専用（運営者 CLI: node src/cli.js delete）。Web には削除エンドポイントを置かない。
 
 const { randomToken, safeEqual } = require('../crypto');
 const { parseCookies, cookieJar, readForm, InboundLimiter, clientIp } = require('./util');
@@ -90,11 +91,10 @@ function createApp({ config, service, crypto, logger }) {
                 case 'GET /me': {
                     if (!session) return send(200, views.loginPage());
                     const data = await service.view(session.uid);
-                    return send(200, views.mePage({ data, csrf }));
+                    return send(200, views.mePage({ data, csrf, app: config.app }));
                 }
 
                 case 'POST /me/optout':
-                case 'POST /me/delete':
                 case 'POST /me/logout': {
                     const form = await readForm(req);
                     if (!checkCsrf(form)) return page(views.messagePage('無効なリクエスト', 'ページを再読み込みしてやり直してください。', { status: 403 }));
@@ -102,14 +102,8 @@ function createApp({ config, service, crypto, logger }) {
                         setCookies.push(jar.clear('session'));
                         return redirect('/me');
                     }
-                    if (route === 'POST /me/optout') {
-                        await service.optOut(session.uid);
-                        return page(views.messagePage('同意を撤回しました', 'トークンを失効させ、メールアドレスと連携アカウント情報を消去しました。'));
-                    }
-                    if (form.confirm !== 'yes') return page(views.messagePage('確認が必要です', '削除の確認にチェックを入れてください。', { status: 400 }));
-                    await service.delete(session.uid);
-                    setCookies.push(jar.clear('session'));
-                    return page(views.messagePage('削除しました', 'あなたに関する保存データをすべて削除しました。'));
+                    await service.optOut(session.uid);
+                    return page(views.messagePage('同意を撤回しました', 'トークンを失効させ、メールアドレスと連携アカウント情報を消去しました。'));
                 }
 
                 default:
@@ -150,7 +144,7 @@ function createApp({ config, service, crypto, logger }) {
                 if (flow === 'link') {
                     const { userId } = await service.completeLink(code);
                     setCookies.push(jar.serialize('session', crypto.sign({ uid: userId, exp: Date.now() + SESSION_TTL_MS }), { maxAgeSec: SESSION_TTL_MS / 1000 }));
-                    return page(views.messagePage('連携しました', '同意を記録しました。保存した内容は「自分のデータ」から確認でき、いつでも撤回・削除できます。'));
+                    return page(views.messagePage('連携しました', '同意を記録しました。保存した内容は「自分のデータ」から確認でき、いつでも撤回できます。'));
                 }
                 const { userId } = await service.completeManage(code);
                 setCookies.push(jar.serialize('session', crypto.sign({ uid: userId, exp: Date.now() + SESSION_TTL_MS }), { maxAgeSec: SESSION_TTL_MS / 1000 }));
