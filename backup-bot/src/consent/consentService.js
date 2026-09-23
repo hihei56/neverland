@@ -23,6 +23,8 @@ class ConsentService {
         this.allowed = new Set(allowedGuildIds);
         /** state -> { guildId, expires } （CSRF対策、10分で失効） */
         this.states = new Map();
+        /** userId:guildId -> 実行中のトークン更新 */
+        this.refreshing = new Map();
     }
 
     startAuthorization(guildId) {
@@ -123,18 +125,39 @@ class ConsentService {
     }
 
     async #validAccessToken(record) {
-        const t = record.tokens;
-        if (!t) return null;
-        // 期限の1時間前からはリフレッシュする
-        if (new Date(t.expiresAt).getTime() - Date.now() > 60 * 60_000) return this.cipher.decrypt(t.accessToken);
+        if (!record.tokens) return null;
+        if (!needsRefresh(record.tokens)) return this.cipher.decrypt(record.tokens.accessToken);
+        // 同じユーザーの更新は1本にまとめる（同時に更新すると片方が invalid_grant になるため）
+        const key = `${record.userId}:${record.guildId}`;
+        let pending = this.refreshing.get(key);
+        if (!pending) {
+            pending = this.#refresh(record.userId, record.guildId).finally(() => this.refreshing.delete(key));
+            this.refreshing.set(key, pending);
+        }
+        return pending;
+    }
+
+    async #refresh(userId, guildId) {
+        // 他の処理が先に更新している可能性があるので、保存済みの最新状態から始める
+        const latest = await this.store.get(userId, guildId);
+        if (!latest?.tokens || latest.status !== 'active') return null;
+        if (!needsRefresh(latest.tokens)) return this.cipher.decrypt(latest.tokens.accessToken);
+
+        const used = latest.tokens.refreshToken;
         try {
-            const fresh = await this.oauth.refresh(this.cipher.decrypt(t.refreshToken));
-            await this.store.setTokens(record.userId, record.guildId, this.#encryptTokens(fresh));
+            const fresh = await this.oauth.refresh(this.cipher.decrypt(used));
+            // 古いリフレッシュトークンは使えなくなるので、受け取ったら何より先に保存する
+            await this.store.setTokens(userId, guildId, this.#encryptTokens(fresh));
             return fresh.access_token;
         } catch (err) {
             if (err instanceof OAuthError && err.oauthError === 'invalid_grant') {
-                // 本人が「認証済みアプリ」から連携解除した等。以後は使わない。
-                await this.store.deactivate(record.userId, record.guildId, 'revoked', 'token_revoked');
+                // 別プロセスが同時に更新して新しいトークンを保存していれば、そちらを使う
+                const again = await this.store.get(userId, guildId);
+                if (again?.tokens && again.tokens.refreshToken.data !== used.data) {
+                    return this.cipher.decrypt(again.tokens.accessToken);
+                }
+                // 本当に無効（本人が「認証済みアプリ」から連携解除した等）。以後は使わない。
+                await this.store.deactivate(userId, guildId, 'revoked', 'token_revoked');
                 return null;
             }
             throw err;
@@ -170,6 +193,11 @@ class ConsentService {
         const now = Date.now();
         for (const [k, v] of this.states) if (v.expires < now) this.states.delete(k);
     }
+}
+
+/** 期限の1時間前からはリフレッシュする */
+function needsRefresh(tokens) {
+    return new Date(tokens.expiresAt).getTime() - Date.now() <= 60 * 60_000;
 }
 
 module.exports = { ConsentService };

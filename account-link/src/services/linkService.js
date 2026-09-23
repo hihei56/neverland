@@ -167,6 +167,11 @@ class LinkService {
             return { ok: true };
         } catch (err) {
             if (err instanceof DiscordApiError && (err.status === 401 || err.oauthError === 'invalid_grant')) {
+                // 別の処理が同時に更新していた場合は無効化しない（トークンは既に新しくなっている）
+                const latest = await this.users.get(userId);
+                if (latest?.tokens && latest.tokens.data !== r.tokens.data) {
+                    return { ok: false, reason: '別の処理が先にトークンを更新しました。もう一度実行してください' };
+                }
                 await this.optOut(userId, { actor: 'system', event: 'token_invalid' });
                 return { ok: false, reason: 'Discord 側で連携が解除されていたため、撤回として処理しました' };
             }
