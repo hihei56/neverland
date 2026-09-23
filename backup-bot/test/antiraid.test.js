@@ -128,3 +128,42 @@ test('プライバシーポリシーに廃止した /privacy コマンドを載�
     assert.match(text, /認証済みアプリ/);   // 連携解除の導線
     assert.match(text, /運営者/);           // 削除の依頼先
 });
+
+test('平文モード(TOKEN_PLAINTEXT)ではトークンをそのまま保存する', async () => {
+    const store = new ConsentStore(fs.mkdtempSync(path.join(os.tmpdir(), 'plain-')));
+    const cipher = createCipher(null, { plaintext: true });
+    const svc = new ConsentService({ store, cipher, oauth: fakeOAuth({ scope: 'identify guilds.join email' }), policyVersion: 'v1', allowedGuildIds: [GID], antiRaid: { collectEmail: true, logIp: true }, logger: silent });
+    const state = new URL(svc.startAuthorization(GID)).searchParams.get('state');
+    await svc.completeAuthorization('code', state, { ip: '203.0.113.9' });
+    const raw = fs.readFileSync(store.file, 'utf8');
+    // 平文モードなので生の値が保存されている
+    assert.ok(raw.includes('a@example.com'));
+    const rec = await store.get('300000000000000003', GID);
+    assert.equal(cipher.decrypt(rec.tokens.accessToken), 'at');
+});
+
+test('describe: 生トークンは含めず、メタ情報とprofileを返す', async () => {
+    const { svc } = setup({ collectEmail: true, logIp: true }, { scope: 'identify guilds.join email' });
+    const state = new URL(svc.startAuthorization(GID)).searchParams.get('state');
+    await svc.completeAuthorization('code', state, { ip: '203.0.113.9' });
+    const [info] = await svc.describe('300000000000000003');
+    assert.equal(info.hasToken, true);
+    assert.equal(info.email, 'a@example.com');
+    assert.ok(info.ipHash);
+    assert.ok(!('accessToken' in info) && !('tokens' in info)); // 生トークンは含めない
+});
+
+
+test('grantVerifyRole: 認証直後に認証ロールを即付与する', async () => {
+    const cipher = createCipher(null, { plaintext: true });
+    const svc = new ConsentService({ store: null, cipher, oauth: { authorizeUrl: () => 'x' }, policyVersion: 'v1', allowedGuildIds: [GID], verifyRoleIds: new Map([[GID, '900000000000000009']]), logger: silent });
+    const puts = [];
+    const client = { rest: { put: async (route) => { puts.push(route); } } };
+    const r = await svc.grantVerifyRole(client, GID, '300000000000000003');
+    assert.equal(r.granted, true);
+    assert.equal(r.roleId, '900000000000000009');
+    assert.ok(puts[0].includes('/roles/900000000000000009'));
+    // 未設定ギルドでは付与しない
+    const svc2 = new ConsentService({ store: null, cipher, oauth: {}, policyVersion: 'v1', allowedGuildIds: [GID], logger: silent });
+    assert.equal((await svc2.grantVerifyRole(client, GID, 'u')).granted, false);
+});

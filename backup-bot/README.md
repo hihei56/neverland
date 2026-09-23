@@ -2,6 +2,7 @@
 
 自分が所有・管理する Discord サーバーの **設定** をバックアップ/復元する Bot です（discord.js v14 / JavaScript）。
 
+
 - Discord 公式 Bot API と OAuth2 だけを使います（ユーザートークン・self-bot は使いません）
 - `ALLOWED_GUILD_IDS` のギルドで、`BOT_OWNER_IDS` に含まれ、管理者権限を持つユーザーだけが操作できます
 - メッセージ本文・メンバー一覧・DM・招待リンクは取得も保存もしません
@@ -51,10 +52,11 @@ backup-bot/
 
 ## セットアップ
 
-1. Developer Portal でアプリを作る。特権インテント（Server Members / Message Content）は **不要** なので OFF のままにする
+1. Developer Portal でアプリを作る。**MESSAGE CONTENT INTENT を ON** にする（NGワード/連投スパムの検知にメッセージ本文が必要）。Server Members は不要
 2. Bot を招待する。招待 URL の scope は `bot applications.commands`。必要な権限は次のとおり
    - Manage Roles, Manage Channels, Manage Guild, Manage Expressions, Manage Webhooks, View Channels
    - 再参加機能を使う場合は Create Instant Invite も必要
+   - モデレーション: NGワード削除に Manage Messages、連投スパム処罰に Moderate Members（タイムアウト）と Kick Members
    - Bot のロールは、復元で作るロールより **上** に置く
 3. `.env.example` を `.env` にコピーして値を設定する
 4. 次を実行する
@@ -111,11 +113,24 @@ npm test
 
 `VERIFY_ROLE_IDS` を設定していれば、新規参加は参加リクエストにロールを含めて1回のAPIで付与します（RestoreCord 方式・呼び出し数を節約）。ロールが原因で参加ごと失敗しないよう、失敗時はロール無しで参加だけ通します。既に参加中のメンバーには個別にロールを付与します。
 
+### 認証ゲートとして使う
+
+backup-bot 単体を「認証の門番」にもできます。
+
+1. 未認証の人には一般チャンネルを見せない設定にし、`VERIFY_ROLE_IDS` に「認証済みロール」を設定する
+2. `/members consent-link` で「認証開始！」ボタンを設置する
+3. 参加者がボタン → Discord 認可 → **成功した直後に認証済みロールが即付与**され、サーバーにアクセスできる（＝門番）
+
+同時に guilds.join も取得するので、サーバーが飛んでも `/members rejoin` で新サーバーへ戻せます。ロール即付与には Bot に Manage Roles と、認証ロールより上のロール位置が必要です。
+
 **コマンドは管理者限定です。** 利用者向けのスラッシュコマンドは置いていません。
 
 - 利用者の取り消し：Discord の「設定 > 認証済みアプリ」からこのアプリの連携を解除する。以後トークンは無効になり、次回処理時に破棄する（`invalid_grant` を検知して自動で失効扱いにする）
 - 利用者の削除依頼：運営者（`PRIVACY_CONTACT`）に連絡してもらい、管理者が `/members forget user_id:<ID> confirm:<同じID>` で削除する
+- `/members info user_id:<ID>`：指定メンバーの保存情報（状態・スコープ・トークン有無と期限・取得している場合は email/連携/IPハッシュ）を表示する。生のトークンは表示しない
 - プライバシーポリシーは Web の `/privacy` で公開する（`/members consent-link` の案内にも載る）
+
+トークン等は既定で AES-256-GCM 暗号化して保存します。`TOKEN_PLAINTEXT=true` にすると暗号化せず平文で保存します（管理者の明示的な選択・**非推奨**。漏えい時にメンバーのトークン/メールがそのまま流出します）。
 
 トークン・メール・連携アカウントは AES-256-GCM で暗号化して保存し、ログには残しません。IP は既定でハッシュのみ記録します。
 
@@ -125,6 +140,19 @@ npm test
 
 - `VERIFY_COLLECT_EMAIL` / `VERIFY_COLLECT_CONNECTIONS`：メール・連携アカウントを暗号化保存
 - `VERIFY_LOG_IP`：認証時の IP を HMAC ハッシュで記録（同一 IP の複数アカウント検出用。生 IP は残さない）／`VERIFY_LOG_IP_RAW` で生 IP を暗号化保存
+
+## モデレーション（簡略版）
+
+`moderator.js` から核となる機能を移植したものです（コマンドは管理者限定）。適用対象ロールは設定でき、**初期は全員（@everyone）**に適用します。管理者・メッセージ管理権限を持つ人は常に対象外です。
+
+- `/moderation show`：現在の設定
+- `/moderation toggle enabled:True|False`：**NGワード自動削除**の有効/無効
+- `/moderation spam enabled:True|False`：**連投スパムの累進処罰**（4秒2通で連投判定 → 削除 → タイムアウトを段階的に延長 → 最終キック、違反は14日記憶）の有効/無効
+- `/moderation target-add role:@X`：適用対象ロールを追加（追加するとそのロール保持者だけが対象）。`@everyone` を指定すると全員に戻る
+- `/moderation target-clear`：適用対象を全員に戻す
+- `/moderation ngword action:add|remove|list word:...`：NGワードの管理
+
+必要な権限は「セットアップ」を参照（Message Content インテント＋Manage Messages／Moderate Members／Kick Members）。
 
 ## レート制限とエラー
 

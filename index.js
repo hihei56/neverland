@@ -18,6 +18,10 @@ const fs = require('fs');
 const path = require('path');
 const { DATA_DIR, WHITELIST } = require('./dataPath');
 const { handleModerator, handleImageDeleteButton } = require('./moderator');
+const { initShiritori, handleShiritoriMessage, resetShiritoriGame } = require('./shiritori');
+const { getSettings: getShiritoriSettings, saveSettings: saveShiritoriSettings } = require('./shiritori_settings');
+const countGame = require('./count_game');
+const vcRecruit = require('./vc_recruit');
 
 const ASSETS = {
     logo: path.join(__dirname, 'assets/logo.png'),
@@ -72,6 +76,7 @@ const client = new Client({
         GatewayIntentBits.MessageContent,
         GatewayIntentBits.GuildMembers,
         GatewayIntentBits.DirectMessages,
+        GatewayIntentBits.GuildVoiceStates,
     ],
 });
 
@@ -370,6 +375,26 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.isButton() && interaction.customId.startsWith('del_img:')) {
         return handleImageDeleteButton(interaction);
     }
+
+    // VC募集ボタン
+    if (interaction.isButton() && interaction.customId === 'vc_recruit_ping') {
+        return vcRecruit.handleVcRecruitButton(interaction).catch((e) => console.error('[VcRecruit btn]', e));
+    }
+
+    // 「認証する」ボタン（!authpanel で設置）→ 呪文認証を開始する
+    if (interaction.isButton() && interaction.customId === 'start_auth') {
+        const member = interaction.member;
+        if (member.roles.cache.has(CONFIG.VERIFY_ROLE_ID) || whitelist.includes(member.id)) {
+            return interaction.reply({ content: '✅ もう認証済みだよ！', ephemeral: true });
+        }
+        const existing = sessions.get(member.id);
+        if (existing) {
+            return interaction.reply({ content: '🔑 すでに認証中だよ。にゅうこくしんさスレッドをみてね。', ephemeral: true });
+        }
+        await interaction.reply({ content: '🔑 にゅうこくしんさスレッドをつくったよ！そちらをみてね。', ephemeral: true });
+        return startAuth(member).catch((err) => console.error('startAuth(button) failed', err));
+    }
+
     if (!interaction.isButton() || !interaction.customId.startsWith('numsel_')) return;
 
     const session = sessions.get(interaction.user.id);
@@ -396,6 +421,64 @@ client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
     await handleModerator(message).catch(console.error);
 
+    // しりとり設定コマンド（管理者のみ）
+    if (message.content.trim().startsWith('!shiritori')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const arg = message.content.trim().split(/\s+/)[1] || '';
+        const settings = getShiritoriSettings();
+        if (arg === 'off') {
+            settings.shiritoriChannelId = null;
+            saveShiritoriSettings(settings);
+            resetShiritoriGame(message.channel.id);
+            return message.reply('🚫 しりとりを無効にしたよ。');
+        }
+        if (arg === 'reset') {
+            resetShiritoriGame(message.channel.id);
+            return message.reply('🔄 このチャンネルのしりとりをリセットしたよ。');
+        }
+        // 引数なし → このチャンネルをしりとり部屋にする
+        settings.shiritoriChannelId = message.channel.id;
+        saveShiritoriSettings(settings);
+        resetShiritoriGame(message.channel.id);
+        return message.reply('🎉 このチャンネルをしりとり部屋にしたよ！単語を送ってあそんでね（`!shiritori off` で無効、`!shiritori reset` でリセット）');
+    }
+
+    // しりとり進行（設定チャンネルのみ・shiritori.js 側で判定）
+    handleShiritoriMessage(message).catch((err) => console.error('[Shiritori]', err));
+
+    // カウントゲーム進行 + VC募集の「サーバー活動中」記録
+    vcRecruit.recordText();
+    countGame.handleCountMessage(message).catch((err) => console.error('[Count]', err));
+
+    // カウントゲーム設定（管理者のみ）
+    if (message.content.trim().startsWith('!count')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const arg = message.content.trim().split(/\s+/)[1] || '';
+        if (arg === 'off') { countGame.disable(message.guild.id); return message.reply('🚫 カウントゲームを無効にしたよ。'); }
+        countGame.setChannel(message.guild.id, message.channel.id);
+        return message.reply('🔢 このチャンネルをカウント部屋にしたよ！ **1** から数えてね（同じ人の連続・数え間違いでリセット）。');
+    }
+
+    // VC募集設定（管理者のみ）
+    if (message.content.trim().startsWith('!vcrecruit')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+        const parts = message.content.trim().split(/\s+/);
+        const arg = parts[1] || '';
+        if (arg === 'off') { vcRecruit.disable(); return message.reply('🚫 VC募集の自動投稿を無効にしたよ。'); }
+        if (arg === 'role') {
+            const role = message.mentions.roles.first();
+            if (!role) return message.reply('ロールをメンションしてね。例: `!vcrecruit role @通話勢`');
+            vcRecruit.setRole(role.id);
+            return message.reply(`📣 募集で呼びかけるロールを ${role} にしたよ。`);
+        }
+        if (arg === 'test') {
+            await vcRecruit.testPost(message.channel);
+            return;
+        }
+        vcRecruit.setChannel(message.channel.id);
+        return message.reply('📣 このチャンネルをVC募集の投稿先にしたよ（VCが2時間無人＆サーバーが活動中のとき自動投稿）。呼びかけロールは `!vcrecruit role @ロール` で設定、テストは `!vcrecruit test`。');
+    }
+
     // 手動再認証コマンド（管理者のみ）
     if (message.content.startsWith('!reauth')) {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
@@ -415,6 +498,26 @@ client.on('messageCreate', async (message) => {
 
         await startAuth(target);
         await message.reply(`${target} の再認証をはじめたよ 🔑`);
+        return;
+    }
+
+    // 認証パネル設置（管理者のみ）: 押すと呪文認証がはじまるボタンを置く
+    if (message.content.startsWith('!authpanel')) {
+        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
+
+        const desc = message.content.slice('!authpanel'.length).trim()
+            || 'したのボタンをおして、にゅうこくしんさ（おまじない認証）をはじめてね 🗝️';
+        const panel = new EmbedBuilder()
+            .setColor(0x5865F2)
+            .setTitle('🌙 ネバーランドのとびら')
+            .setDescription(desc);
+        if (assetUrls.logo) panel.setThumbnail(assetUrls.logo);
+        if (assetUrls.bg) panel.setImage(assetUrls.bg);
+        const row = new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('start_auth').setLabel('認証する').setEmoji('🔑').setStyle(ButtonStyle.Primary),
+        );
+        await message.channel.send({ embeds: [panel], components: [row] });
+        await message.delete().catch(() => {});
         return;
     }
 
@@ -492,6 +595,9 @@ client.on('messageCreate', async (message) => {
                 { name: '`!auth pause`', value: '入国審査を一時停止（この間の入国者は認証不要）' },
                 { name: '`!auth resume`', value: '入国審査を再開' },
                 { name: '`!auth status`', value: '入国審査の現在の状態を確認' },
+                { name: '`!shiritori`', value: 'このチャンネルをしりとり部屋にする（`off`で無効 / `reset`でリセット）' },
+                { name: '`!count`', value: 'このチャンネルをカウントゲーム部屋にする（`off`で無効）' },
+                { name: '`!vcrecruit`', value: 'VC募集の自動投稿先を設定（`role @X`/`test`/`off`）' },
                 { name: '`!help`', value: 'このヘルプを表示' },
             )] });
     }
@@ -517,6 +623,8 @@ client.on('messageCreate', async (message) => {
 client.once('clientReady', async (c) => {
     console.log(`${c.user.tag} きどうしたよ！`);
     await initAssets(c).catch(console.error);
+    initShiritori();
+    vcRecruit.initVcRecruit(c);
 });
 
 client.login(process.env.DISCORD_TOKEN);

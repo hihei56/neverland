@@ -136,6 +136,24 @@ class ConsentService {
     }
 
     /**
+     * 認証ボタンで OAuth 完了した直後に、認証ロールを即付与する（backup-bot を門番として使う場合）。
+     * VERIFY_ROLE_IDS にそのギルドの設定があるときのみ。ユーザーは対象ギルドの参加者である必要がある。
+     * @returns {Promise<{ granted: boolean, roleId: string|null }>}
+     */
+    async grantVerifyRole(client, guildId, userId) {
+        const roleId = this.verifyRoleIds.get(guildId) || null;
+        if (!roleId) return { granted: false, roleId: null };
+        try {
+            await client.rest.put(Routes.guildMemberRole(guildId, userId, roleId), { reason: 'OAuth 認証成功' });
+            this.logger.info('verify role granted', { guildId, userId, roleId });
+            return { granted: true, roleId };
+        } catch (err) {
+            this.logger.warn('verify role grant failed', { guildId, userId, roleId, error: err });
+            return { granted: false, roleId };
+        }
+    }
+
+    /**
      * 荒らし対策の追加情報を暗号化して返す（有効化された項目のみ）。
      * email/connections は個人情報なので暗号化、IPは既定でHMACハッシュのみ。
      */
@@ -196,6 +214,38 @@ class ConsentService {
         return (await this.store.listByUser(userId)).map((r) => ({
             guildId: r.guildId, status: r.status, consentedAt: r.consentedAt, policyVersion: r.policyVersion,
         }));
+    }
+
+    /**
+     * 管理者向け: 指定ユーザーの保存情報を復号して返す（生トークンは含めない）。
+     * email/connections/ipHash は荒らし対策で取得している場合のみ。
+     */
+    async describe(userId) {
+        return (await this.store.listByUser(userId)).map((r) => {
+            const info = {
+                guildId: r.guildId,
+                status: r.status,
+                consentedAt: r.consentedAt,
+                policyVersion: r.policyVersion,
+                scopes: r.scopes || [],
+                hasToken: Boolean(r.tokens),
+                tokenExpiresAt: r.tokens?.expiresAt ?? null,
+            };
+            if (r.profile) {
+                info.ipHash = r.profile.ipHash ?? null;
+                info.collectedAt = r.profile.collectedAt ?? null;
+                if (r.profile.enc) {
+                    try {
+                        const data = JSON.parse(this.cipher.decrypt(r.profile.enc));
+                        info.email = data.email ?? null;
+                        info.connections = data.connections ?? null;
+                    } catch (err) {
+                        this.logger.warn('describe: profile decrypt failed', { error: err });
+                    }
+                }
+            }
+            return info;
+        });
     }
 
     async countActive(guildId) {

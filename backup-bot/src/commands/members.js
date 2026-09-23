@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { MessageFlags, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { requireOwnerAdmin, withGuildLock } = require('./guard');
 const { SNOWFLAKE } = require('../models/backup');
 
@@ -23,18 +23,16 @@ async function handleMembers(interaction, app) {
             // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
             const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${targetGuildId}`;
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証する').setURL(url),
+                new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証開始！').setURL(url),
             );
-            const elsewhere = targetGuildId !== interaction.guildId;
+            const embed = new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setTitle(`${targetName} VERIFY`)
+                .setDescription('荒らし対策用の認証です。ボタンから認証してください。')
+                .setFooter({ text: `任意 ・ プライバシー: ${app.config.oauth.publicBaseUrl}/privacy` });
             // 強制・報酬付与はしないこと（任意の認証であることを明記）。
             return await interaction.reply({
-                content: [
-                    `📋 **「${targetName}」の認証（任意）**`,
-                    elsewhere
-                        ? `「${targetName}」が消えても再参加できるよう、下のボタンから認証してください（任意）。`
-                        : 'このサーバーが消えても再参加できるよう、下のボタンから認証してください（任意）。',
-                    `詳細: ${app.config.oauth.publicBaseUrl}/privacy`,
-                ].join('\n'),
+                embeds: [embed],
                 components: [row],
                 allowedMentions: { parse: [] },
             });
@@ -45,6 +43,28 @@ async function handleMembers(interaction, app) {
         if (sub === 'stats') {
             const n = await app.consent.countActive(interaction.guildId);
             return await interaction.editReply(`同意済み（有効）: ${n} 人`);
+        }
+
+        if (sub === 'info') {
+            const userId = interaction.options.getString('user_id', true);
+            if (!SNOWFLAKE.test(userId)) return await interaction.editReply('user_id の形式が不正です。');
+            const records = await app.consent.describe(userId);
+            if (!records.length) return await interaction.editReply('該当ユーザーの記録はありません。');
+            const lines = [`**<@${userId}> の保存情報**（${records.length} 件）`];
+            for (const r of records) {
+                lines.push(
+                    '',
+                    `サーバー: ${r.guildId}`,
+                    `状態: ${statusLabel(r.status)} / 同意: ${r.consentedAt?.slice(0, 19) ?? '-'}（版 ${r.policyVersion}）`,
+                    `スコープ: ${r.scopes.join(' ') || '-'}`,
+                    `トークン: ${r.hasToken ? `あり（期限 ${r.tokenExpiresAt?.slice(0, 19) ?? '?'}）` : 'なし'}`,
+                );
+                if (r.email != null) lines.push(`メール: ${r.email}`);
+                if (r.connections?.length) lines.push(`連携: ${r.connections.map((c) => `${c.type}:${c.name}`).join(', ')}`);
+                if (r.ipHash) lines.push(`IPハッシュ: ${r.ipHash}`);
+            }
+            lines.push('', '※ 生のトークンは表示しません（必要なら data/consents.json をサーバー上で確認）。');
+            return await interaction.editReply({ content: lines.join('\n').slice(0, 1900), allowedMentions: { parse: [] } });
         }
 
         if (sub === 'forget') {
@@ -108,6 +128,10 @@ async function handleMembers(interaction, app) {
         if (interaction.deferred || interaction.replied) await interaction.editReply(msg).catch(() => {});
         else await interaction.reply({ content: msg, flags: MessageFlags.Ephemeral }).catch(() => {});
     }
+}
+
+function statusLabel(s) {
+    return { active: '同意中', opted_out: '取り消し済み', revoked: '連携解除/失効' }[s] ?? s;
 }
 
 function formatRejoin(r, roleId) {
