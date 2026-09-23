@@ -52,6 +52,7 @@ async function main() {
             }),
             policyVersion: config.privacy.policyVersion,
             allowedGuildIds: config.allowedGuildIds,
+            antiRaid: config.antiRaid,
             logger,
         });
         web = createWebServer({ config, consent: app.consent, client, logger });

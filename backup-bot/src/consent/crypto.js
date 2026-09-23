@@ -19,6 +19,12 @@ function createCipher(hexKey) {
             d.setAuthTag(Buffer.from(v.tag, 'base64'));
             return Buffer.concat([d.update(Buffer.from(v.data, 'base64')), d.final()]).toString('utf8');
         },
+        // IP等の「同一かどうかだけ判定したい」値を、生値を残さず鍵付きハッシュ化する。
+        // 鍵は暗号鍵から HKDF で分離するので、DB が漏れても総当たり以外で復元できない。
+        fingerprint(value) {
+            const hkey = crypto.hkdfSync('sha256', key, Buffer.alloc(0), 'anti-raid-fingerprint/v1', 32);
+            return crypto.createHmac('sha256', Buffer.from(hkey)).update(String(value)).digest('hex').slice(0, 32);
+        },
     };
 }
 

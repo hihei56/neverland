@@ -58,6 +58,7 @@ class ConsentStore {
                 if (r.userId !== userId || (guildId && r.guildId !== guildId)) continue;
                 r.status = status;
                 r.tokens = null;
+                r.profile = null; // email/connections/IP も破棄する
                 r.updatedAt = new Date().toISOString();
                 db.events.push(event(r, eventAction));
                 changed = (changed ?? 0) + 1;

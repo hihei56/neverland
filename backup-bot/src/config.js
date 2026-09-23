@@ -67,6 +67,17 @@ function loadConfig() {
             // 再参加1件ごとの待機(ms)。レート制限を避けるための間隔。
             joinDelayMs: Number(process.env.MEMBER_JOIN_DELAY_MS || 750),
         },
+        // 荒らし対策として認証時に追加取得する情報（すべて既定 false、任意で有効化）。
+        // email/connections は本人が OAuth 認可画面で許可した場合のみ取得できる。
+        // 有効化する場合は /privacy policy とサーバー側の掲示で必ず周知すること。
+        antiRaid: {
+            collectEmail: process.env.VERIFY_COLLECT_EMAIL === 'true',
+            collectConnections: process.env.VERIFY_COLLECT_CONNECTIONS === 'true',
+            // IP は既定で HMAC ハッシュのみ記録（同一IP判定用、生IPは残さない）。
+            logIp: process.env.VERIFY_LOG_IP === 'true',
+            // 生IPまで保存する（VPN判定等が必要な場合のみ。取り扱い注意）。
+            logIpRaw: process.env.VERIFY_LOG_IP_RAW === 'true',
+        },
         privacy: {
             policyVersion: process.env.PRIVACY_POLICY_VERSION || '2026-09-23',
             contact: process.env.PRIVACY_CONTACT || '(未設定: PRIVACY_CONTACT を設定してください)',

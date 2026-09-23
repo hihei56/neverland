@@ -12,7 +12,7 @@ async function handlePrivacy(interaction, app) {
 
     try {
         if (sub === 'policy') {
-            const text = privacyPolicyText(app.config.privacy);
+            const text = privacyPolicyText({ ...app.config.privacy, antiRaid: app.config.antiRaid });
             const link = app.config.oauth.enabled ? `\n全文: ${app.config.oauth.publicBaseUrl}/privacy` : '';
             return await reply(text.slice(0, 1800) + (text.length > 1800 ? '\n…' : '') + link);
         }

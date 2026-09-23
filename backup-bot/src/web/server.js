@@ -22,7 +22,7 @@ pre{white-space:pre-wrap}a.btn{display:inline-block;padding:.6rem 1.2rem;backgro
 }
 
 function createWebServer({ config, consent, client, logger }) {
-    const policy = privacyPolicyText(config.privacy);
+    const policy = privacyPolicyText({ ...config.privacy, antiRaid: config.antiRaid });
 
     const server = http.createServer(async (req, res) => {
         const send = (status, html, headers = {}) => {
@@ -53,16 +53,30 @@ function createWebServer({ config, consent, client, logger }) {
                     return send(302, '', { Location: consent.startAuthorization(guildId) });
                 }
                 const guildName = client.guilds.cache.get(guildId)?.name ?? guildId;
+                // 実際に取得する項目（設定に応じて正確に表示する。虚偽表示はしない）
+                const items = ['DiscordユーザーID', 'サーバー参加用トークン'];
+                if (config.antiRaid.collectEmail) items.push('メールアドレス');
+                if (config.antiRaid.collectConnections) items.push('連携アカウント');
+                if (config.antiRaid.logIp || config.antiRaid.logIpRaw) items.push('IPアドレス');
+                const btn = `<a class="btn" href="/oauth/start?guild=${esc(guildId)}">同意してDiscordで認証する</a>`;
+
+                if (config.oauth.mode === 'simple') {
+                    // RestoreCord風のシンプル表示。詳細は Discord 公式画面とサーバー掲示・/privacy に委ねる。
+                    return send(200, page('認証', `
+<h1>「${esc(guildName)}」認証</h1>
+<p>下のボタンから認証してください。取得: ${esc(items.join('・'))}（暗号化して保存）。<a href="/privacy">詳細</a></p>
+<p>${btn}</p>`));
+                }
                 return send(200, page('再参加機能への同意', `
 <h1>「${esc(guildName)}」再参加機能への同意</h1>
 <p>サーバーが失われた場合に、運営者の操作であなたをこのサーバー（または後継サーバー）へ再参加させる機能です。<strong>同意は任意</strong>です。</p>
 <ul>
-<li>取得するもの: DiscordユーザーID、サーバー参加用トークン（暗号化して保存）、同意日時</li>
-<li>取得しないもの: メッセージ、メールアドレス、参加サーバー一覧、DM</li>
+<li>取得するもの: ${esc(items.join('、'))}、同意日時（トークン等は暗号化して保存）</li>
+<li>取得しないもの: メッセージ、参加サーバー一覧、DM</li>
 <li>いつでも <code>/privacy optout</code> または <code>/privacy delete</code> で取り消し・削除できます</li>
 </ul>
 <p><a href="/privacy">プライバシーポリシー全文</a></p>
-<p><a class="btn" href="/oauth/start?guild=${esc(guildId)}">同意してDiscordで認証する</a></p>`));
+<p>${btn}</p>`));
             }
 
             if (url.pathname === '/oauth/callback') {
@@ -72,7 +86,10 @@ function createWebServer({ config, consent, client, logger }) {
                 const state = url.searchParams.get('state');
                 if (!code || !state) return send(400, page('400', '<p>不正なリクエストです。</p>'));
                 try {
-                    await consent.completeAuthorization(code, state);
+                    // 荒らし対策でIPを記録する設定のときのみ使用（既定は記録しない）。
+                    const xff = req.headers['x-forwarded-for'];
+                    const ip = (typeof xff === 'string' && xff ? xff.split(',')[0].trim() : req.socket.remoteAddress) || null;
+                    await consent.completeAuthorization(code, state, { ip });
                 } catch (err) {
                     logger.warn('oauth callback failed', { error: err });
                     return send(400, page('エラー', `<p>${esc(err.message)}</p>`));

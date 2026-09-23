@@ -44,18 +44,22 @@ function createDiscordOAuth({ clientId, clientSecret, redirectUri, logger }) {
         exchangeCode: (code) => post('/oauth2/token', { grant_type: 'authorization_code', code, redirect_uri: redirectUri }),
         refresh: (refreshToken) => post('/oauth2/token', { grant_type: 'refresh_token', refresh_token: refreshToken }),
         revoke: (token, hint) => post('/oauth2/token/revoke', { token, token_type_hint: hint }),
-        async me(accessToken) {
-            return withRetry(async () => {
-                const res = await fetch(`${API}/users/@me`, {
-                    headers: { Authorization: `Bearer ${accessToken}` },
-                    signal: AbortSignal.timeout(15_000),
-                });
-                const body = await res.json().catch(() => ({}));
-                if (!res.ok) throw new OAuthError(res.status, body);
-                return body;
-            }, { label: 'oauth/me', logger });
-        },
+        me: (accessToken) => getAuthed('/users/@me', accessToken),
+        // connections スコープが許可されているときだけ有効。荒らし対策用（任意）。
+        connections: (accessToken) => getAuthed('/users/@me/connections', accessToken),
     };
+
+    function getAuthed(pathname, accessToken) {
+        return withRetry(async () => {
+            const res = await fetch(`${API}${pathname}`, {
+                headers: { Authorization: `Bearer ${accessToken}` },
+                signal: AbortSignal.timeout(15_000),
+            });
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) throw new OAuthError(res.status, body);
+            return body;
+        }, { label: `oauth${pathname}`, logger });
+    }
 }
 
 module.exports = { createDiscordOAuth, OAuthError };

@@ -18,13 +18,28 @@ class ConsentService {
      * @param {string[]} deps.allowedGuildIds
      * @param {any} deps.logger
      */
-    constructor({ store, cipher, oauth, policyVersion, allowedGuildIds, logger }) {
+    constructor({ store, cipher, oauth, policyVersion, allowedGuildIds, logger, antiRaid = {} }) {
         Object.assign(this, { store, cipher, oauth, policyVersion, logger });
         this.allowed = new Set(allowedGuildIds);
+        // 荒らし対策の追加取得（すべて既定 false）。email/connections は追加スコープが必要。
+        this.antiRaid = {
+            collectEmail: Boolean(antiRaid.collectEmail),
+            collectConnections: Boolean(antiRaid.collectConnections),
+            logIp: Boolean(antiRaid.logIp) || Boolean(antiRaid.logIpRaw),
+            logIpRaw: Boolean(antiRaid.logIpRaw),
+        };
         /** state -> { guildId, expires } （CSRF対策、10分で失効） */
         this.states = new Map();
         /** userId:guildId -> 実行中のトークン更新 */
         this.refreshing = new Map();
+    }
+
+    /** このデプロイで要求するOAuthスコープ。 */
+    scopes() {
+        const s = [...REQUIRED_SCOPES];
+        if (this.antiRaid.collectEmail) s.push('email');
+        if (this.antiRaid.collectConnections) s.push('connections');
+        return s;
     }
 
     startAuthorization(guildId) {
@@ -32,23 +47,30 @@ class ConsentService {
         this.#gcStates();
         const state = crypto.randomBytes(24).toString('base64url');
         this.states.set(state, { guildId, expires: Date.now() + 10 * 60_000 });
-        return this.oauth.authorizeUrl(state, REQUIRED_SCOPES);
+        return this.oauth.authorizeUrl(state, this.scopes());
     }
 
-    /** OAuthコールバック処理。成功時は同意記録を保存する。 */
-    async completeAuthorization(code, state) {
+    /**
+     * OAuthコールバック処理。成功時は同意記録を保存する。
+     * @param {string} code
+     * @param {string} state
+     * @param {{ ip?: string|null }} [meta] 荒らし対策でIPを記録する場合のみ使用
+     */
+    async completeAuthorization(code, state, meta = {}) {
         const s = this.states.get(state);
         this.states.delete(state);
         if (!s || s.expires < Date.now()) throw new Error('リンクの有効期限が切れています。最初からやり直してください');
 
         const token = await this.oauth.exchangeCode(code);
         const granted = String(token.scope || '').split(' ');
+        // guilds.join は必須。email/connections は要求していても任意扱い（無くても続行）。
         const missing = REQUIRED_SCOPES.filter((sc) => !granted.includes(sc));
         if (missing.length) {
             await this.#revokeQuietly(token.access_token, 'access_token');
             throw new Error(`必要な権限が許可されませんでした: ${missing.join(', ')}`);
         }
         const user = await this.oauth.me(token.access_token);
+        const profile = await this.#collectProfile(token.access_token, granted, meta);
         const now = new Date().toISOString();
         await this.store.upsert({
             userId: user.id,
@@ -59,9 +81,52 @@ class ConsentService {
             updatedAt: now,
             status: 'active',
             tokens: this.#encryptTokens(token),
+            profile,
         }, 'granted');
-        this.logger.info('consent granted', { guildId: s.guildId });
+        this.logger.info('consent granted', { guildId: s.guildId, collected: Object.keys(profile ?? {}) });
         return { userId: user.id, guildId: s.guildId };
+    }
+
+    /**
+     * 荒らし対策の追加情報を暗号化して返す（有効化された項目のみ）。
+     * email/connections は個人情報なので暗号化、IPは既定でHMACハッシュのみ。
+     */
+    async #collectProfile(accessToken, granted, meta) {
+        const a = this.antiRaid;
+        if (!a.collectEmail && !a.collectConnections && !a.logIp) return null;
+        const data = {};
+        try {
+            if (a.collectEmail && granted.includes('email')) {
+                const me = await this.oauth.me(accessToken);
+                if (me.email) data.email = me.email;
+            }
+            if (a.collectConnections && granted.includes('connections')) {
+                const conns = await this.oauth.connections(accessToken);
+                data.connections = (conns || []).map((c) => ({ type: c.type, id: c.id, name: c.name, verified: Boolean(c.verified) }));
+            }
+        } catch (err) {
+            this.logger.warn('anti-raid profile fetch failed', { error: err });
+        }
+        const profile = {};
+        if (Object.keys(data).length) profile.enc = this.cipher.encrypt(JSON.stringify(data));
+        if (a.logIp && meta.ip) {
+            profile.ipHash = this.cipher.fingerprint(meta.ip); // 同一IP判定用（生値は残さない）
+            if (a.logIpRaw) profile.ipRaw = this.cipher.encrypt(meta.ip);
+        }
+        profile.collectedAt = new Date().toISOString();
+        return profile;
+    }
+
+    /** 荒らし判定用: 同じ ipHash を持つ同意者をまとめる（同一IPの複数アカウント検出）。 */
+    async ipClusters(guildId) {
+        const records = await this.store.listActive(guildId);
+        const byHash = new Map();
+        for (const r of records) {
+            const h = r.profile?.ipHash;
+            if (!h) continue;
+            (byHash.get(h) ?? byHash.set(h, []).get(h)).push(r.userId);
+        }
+        return [...byHash.values()].filter((ids) => ids.length > 1);
     }
 
     /** オプトアウト: トークンを Discord 側で失効させ、保存分も破棄する。記録は status=opted_out で残る。 */
