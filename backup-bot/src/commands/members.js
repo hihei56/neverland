@@ -14,19 +14,29 @@ async function handleMembers(interaction, app) {
 
     try {
         if (sub === 'consent-link') {
+            // 認証対象のサーバー（既定は現在のサーバー。別サーバーから誘導する場合は for_guild で指定）
+            const targetGuildId = interaction.options.getString('for_guild') || interaction.guildId;
+            if (!SNOWFLAKE.test(targetGuildId) || !app.config.allowedGuildIds.includes(targetGuildId)) {
+                return await interaction.reply({ content: '⛔ for_guild が ALLOWED_GUILD_IDS に含まれていません。', flags: MessageFlags.Ephemeral });
+            }
+            const targetName = interaction.client.guilds.cache.get(targetGuildId)?.name || `サーバー ${targetGuildId}`;
             // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
-            const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${interaction.guildId}`;
+            const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${targetGuildId}`;
             const row = new ActionRowBuilder().addComponents(
                 new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証する').setURL(url),
             );
+            const elsewhere = targetGuildId !== interaction.guildId;
             // 強制・報酬付与はしないこと（任意の認証であることを明記）。
             return await interaction.reply({
                 content: [
-                    '📋 **サーバー再参加の認証（任意）**',
-                    'サーバーが消えても新しいサーバーへ再参加できるようにする機能です。ボタンから認証してください（任意）。',
+                    `📋 **「${targetName}」の認証（任意）**`,
+                    elsewhere
+                        ? `「${targetName}」が消えても再参加できるよう、下のボタンから認証してください（任意）。`
+                        : 'このサーバーが消えても再参加できるよう、下のボタンから認証してください（任意）。',
                     `詳細: ${app.config.oauth.publicBaseUrl}/privacy`,
                 ].join('\n'),
                 components: [row],
+                allowedMentions: { parse: [] },
             });
         }
 

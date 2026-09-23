@@ -101,6 +101,7 @@ npm test
 `OAUTH_ENABLED=true` にすると有効になります。
 
 1. `/members consent-link` で「認証する」ボタンを投稿する（案内は任意であることを明記）
+   - 別の自分のサーバー（`ALLOWED_GUILD_IDS` に含まれるサーバー）から誘導したい場合は `for_guild:<メインのサーバーID>` を付ける。例: 避難用サーバーに置いたボタンから、メインサーバー向けの認証をさせる
 2. 希望した人がボタンを押すと、中間ページ無しで Discord の認可画面（`identify guilds.join`）が直接開く。許可すると完了画面が出る
 3. サーバーを作り直したら、新しいサーバーで `/members rejoin source_guild:<元のID>` を実行する（dry-run）。表示された確認コードを付けて、もう一度実行する
 
