@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { MessageFlags, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } = require('discord.js');
 const { requireOwnerAdmin, withGuildLock } = require('./guard');
 const { SNOWFLAKE } = require('../models/backup');
 
@@ -23,18 +23,16 @@ async function handleMembers(interaction, app) {
             // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
             const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${targetGuildId}`;
             const row = new ActionRowBuilder().addComponents(
-                new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証する').setURL(url),
+                new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証開始！').setURL(url),
             );
-            const elsewhere = targetGuildId !== interaction.guildId;
+            const embed = new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setTitle(`${targetName} VERIFY`)
+                .setDescription('"有事"の際のお引越しを円滑にするための認証です')
+                .setFooter({ text: `任意 ・ プライバシー: ${app.config.oauth.publicBaseUrl}/privacy` });
             // 強制・報酬付与はしないこと（任意の認証であることを明記）。
             return await interaction.reply({
-                content: [
-                    `📋 **「${targetName}」の認証（任意）**`,
-                    elsewhere
-                        ? `「${targetName}」が消えても再参加できるよう、下のボタンから認証してください（任意）。`
-                        : 'このサーバーが消えても再参加できるよう、下のボタンから認証してください（任意）。',
-                    `詳細: ${app.config.oauth.publicBaseUrl}/privacy`,
-                ].join('\n'),
+                embeds: [embed],
                 components: [row],
                 allowedMentions: { parse: [] },
             });
