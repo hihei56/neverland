@@ -132,7 +132,7 @@ class ConsentService {
             profile,
         }, 'granted');
         this.logger.info('consent granted', { guildId: s.guildId, collected: Object.keys(profile ?? {}) });
-        return { userId: user.id, guildId: s.guildId };
+        return { userId: user.id, guildId: s.guildId, username: user.username || null, ipHash: profile?.ipHash || null };
     }
 
     /**

@@ -20,6 +20,10 @@ async function handleMembers(interaction, app) {
                 return await interaction.reply({ content: '⛔ for_guild が ALLOWED_GUILD_IDS に含まれていません。', flags: MessageFlags.Ephemeral });
             }
             const targetName = interaction.client.guilds.cache.get(targetGuildId)?.name || `サーバー ${targetGuildId}`;
+            const title = (interaction.options.getString('title') || `${targetName} VERIFY`).slice(0, 256);
+            const description = interaction.options.getString('description') || '荒らし対策用の認証です。ボタンから認証してください。';
+            const useWebhook = interaction.options.getBoolean('webhook') ?? false;
+            const senderName = (interaction.options.getString('sender_name') || title).slice(0, 80);
             // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
             const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${targetGuildId}`;
             const row = new ActionRowBuilder().addComponents(
@@ -27,10 +31,29 @@ async function handleMembers(interaction, app) {
             );
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
-                .setTitle(`${targetName} VERIFY`)
-                .setDescription('荒らし対策用の認証です。ボタンから認証してください。')
+                .setTitle(title)
+                .setDescription(description)
                 .setFooter({ text: `任意 ・ プライバシー: ${app.config.oauth.publicBaseUrl}/privacy` });
             // 強制・報酬付与はしないこと（任意の認証であることを明記）。
+
+            if (useWebhook) {
+                if (!interaction.channel?.isTextBased() || typeof interaction.channel.createWebhook !== 'function') {
+                    return await interaction.reply({ content: '⛔ このチャンネルでは Webhook を作成できません。', flags: MessageFlags.Ephemeral });
+                }
+                const me = interaction.guild.members.me ?? (await interaction.guild.members.fetchMe());
+                if (!me.permissions.has(PermissionFlagsBits.ManageWebhooks)) {
+                    return await interaction.reply({ content: '⛔ Bot に「ウェブフックの管理」権限が必要です。', flags: MessageFlags.Ephemeral });
+                }
+                // アプリ所有の Webhook はボタン（コンポーネント）付きで送信できる。送信後に片付ける。
+                const hook = await interaction.channel.createWebhook({ name: senderName, reason: '認証パネルの投稿' });
+                try {
+                    await hook.send({ username: senderName, embeds: [embed], components: [row], allowedMentions: { parse: [] } });
+                } finally {
+                    await hook.delete('認証パネル投稿後の後始末').catch(() => {});
+                }
+                return await interaction.reply({ content: `✅ Webhook で認証パネルを投稿しました（送信者名: ${senderName}）。`, flags: MessageFlags.Ephemeral });
+            }
+
             return await interaction.reply({
                 embeds: [embed],
                 components: [row],

@@ -7,8 +7,32 @@
 // 本番では HTTPS のリバースプロキシ配下に置くこと。
 
 const http = require('node:http');
+const { EmbedBuilder } = require('discord.js');
 const { privacyPolicyText } = require('../consent/privacyPolicy');
 const { SNOWFLAKE } = require('../models/backup');
+
+/** 認証ログを指定チャンネルへ投稿する（設定されているギルドのみ）。 */
+async function postAuthLog(client, config, logger, { guildId, userId, username, granted, roleId, ipHash }) {
+    const channelId = config.members.authLogChannelIds.get(guildId);
+    if (!channelId) return;
+    try {
+        const channel = await client.channels.fetch(channelId).catch(() => null);
+        if (!channel?.isTextBased?.()) return;
+        const embed = new EmbedBuilder()
+            .setColor(0x57F287)
+            .setTitle('✅ 認証成功')
+            .addFields(
+                { name: 'ユーザー', value: `<@${userId}>${username ? ` (${username})` : ''}`, inline: true },
+                { name: 'ID', value: userId, inline: true },
+                { name: 'ロール付与', value: granted ? (roleId ? `<@&${roleId}>` : 'あり') : 'なし', inline: true },
+            )
+            .setTimestamp();
+        if (ipHash) embed.addFields({ name: 'IPハッシュ', value: `\`${ipHash}\``, inline: false });
+        await channel.send({ embeds: [embed], allowedMentions: { parse: [] } });
+    } catch (err) {
+        logger.warn('auth log post failed', { guildId, error: err });
+    }
+}
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
@@ -156,6 +180,15 @@ function createWebServer({ config, consent, client, logger }) {
                 }
                 // 認証ロールが設定されていれば即付与（門番として使う場合）
                 const grant = await consent.grantVerifyRole(client, result.guildId, result.userId);
+                // 認証ログ（設定されていれば投稿）。ログ失敗は完了画面に影響させない。
+                await postAuthLog(client, config, logger, {
+                    guildId: result.guildId,
+                    userId: result.userId,
+                    username: result.username,
+                    granted: grant.granted,
+                    roleId: grant.roleId,
+                    ipHash: result.ipHash,
+                });
                 const guildName = client.guilds.cache.get(result.guildId)?.name;
                 const lead = grant.granted
                     ? `認証が完了し、${guildName ? `「${esc(guildName)}」` : 'サーバー'}にアクセスできるようになりました。`

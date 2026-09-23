@@ -154,6 +154,22 @@ test('describe: 生トークンは含めず、メタ情報とprofileを返す', 
 });
 
 
+test('completeAuthorization: 認証ログ用に username と ipHash を返す', async () => {
+    const { svc } = setup({ logIp: true }, { scope: 'identify guilds.join' });
+    const state = new URL(svc.startAuthorization(GID)).searchParams.get('state');
+    const r = await svc.completeAuthorization('code', state, { ip: '203.0.113.9' });
+    assert.equal(r.userId, '300000000000000003');
+    assert.equal(r.guildId, GID);
+    assert.equal(r.username, 'alice');
+    assert.ok(/^[0-9a-f]{32}$/.test(r.ipHash), 'IPを記録する設定では ipHash を返す');
+
+    // IP非記録の既定では ipHash は null
+    const { svc: svc2 } = setup({}, { scope: 'identify guilds.join' });
+    const st2 = new URL(svc2.startAuthorization(GID)).searchParams.get('state');
+    const r2 = await svc2.completeAuthorization('code', st2, { ip: '203.0.113.9' });
+    assert.equal(r2.ipHash, null);
+});
+
 test('grantVerifyRole: 認証直後に認証ロールを即付与する', async () => {
     const cipher = createCipher(null, { plaintext: true });
     const svc = new ConsentService({ store: null, cipher, oauth: { authorizeUrl: () => 'x' }, policyVersion: 'v1', allowedGuildIds: [GID], verifyRoleIds: new Map([[GID, '900000000000000009']]), logger: silent });

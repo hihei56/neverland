@@ -62,6 +62,8 @@ function loadConfig() {
         members: {
             // 再参加/認証時に付与するロール（任意）。"guildId:roleId,..." 形式。
             verifyRoleIds: pairMap('VERIFY_ROLE_IDS'),
+            // 認証ログを投稿するチャンネル（任意）。"guildId:channelId,..." 形式。
+            authLogChannelIds: pairMap('AUTH_LOG_CHANNEL_IDS'),
             // 再参加1件ごとの待機(ms)。レート制限を避けるための間隔。
             joinDelayMs: Number(process.env.MEMBER_JOIN_DELAY_MS || 750),
         },
