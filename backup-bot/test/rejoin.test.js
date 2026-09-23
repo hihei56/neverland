@@ -41,19 +41,21 @@ async function setup({ oauth, verifyRoleIds } = {}) {
     return { store, cipher, svc, add, run };
 }
 
-test('失敗を種類ごとに分類する', async () => {
+test('失敗を種類ごとに分類する（実測コードに基づく）', async () => {
     const t = await setup();
     await t.add('400000000000000001'); // 201 added
     await t.add('400000000000000002'); // 204 already
-    await t.add('400000000000000003'); // banned
-    await t.add('400000000000000004'); // account deleted
-    await t.add('400000000000000005'); // guild limit
+    await t.add('400000000000000003'); // banned 40007
+    await t.add('400000000000000004'); // account deleted 10013
+    await t.add('400000000000000005'); // guild limit 30001
+    await t.add('400000000000000006'); // user limited 340015
     const outcomes = {
         '400000000000000001': () => ({ user: { id: 'x' } }),
         '400000000000000002': () => null,
         '400000000000000003': () => { throw apiError(403, 40007); },
         '400000000000000004': () => { throw apiError(403, 10013); },
         '400000000000000005': () => { throw apiError(400, 30001); },
+        '400000000000000006': () => { throw apiError(403, 340015); },
     };
     const rest = { put: async (route) => outcomes[route.split('/').pop()]() };
     const r = await t.run(rest);
@@ -62,7 +64,12 @@ test('失敗を種類ごとに分類する', async () => {
     assert.equal(r.banned, 1);
     assert.equal(r.accountDeleted, 1);
     assert.equal(r.guildLimit, 1);
+    assert.equal(r.userLimited, 1);
     assert.equal(r.failed, 0);
+    // アカウント制限(340015)はリフレッシュ再試行しない（無駄打ちしない）
+    assert.equal((await t.store.get('400000000000000006', SRC)).status, 'active');
+    // アカウント削除(10013)は失効扱いにして以後スキップ
+    assert.equal((await t.store.get('400000000000000004', SRC)).status, 'revoked');
 });
 
 test('403(トークン失効)なら1回リフレッシュして再試行し成功する', async () => {
@@ -83,14 +90,25 @@ test('403(トークン失効)なら1回リフレッシュして再試行し成�
     assert.equal(call, 2);
 });
 
-test('招待停止(コード)なら全体を中断する', async () => {
+test('招待停止(400002)なら全体を中断する', async () => {
     const t = await setup();
     for (let i = 1; i <= 5; i++) await t.add(`40000000000000000${i}`);
     let calls = 0;
-    const rest = { put: async () => { calls++; throw apiError(400, 40002); } };
+    const rest = { put: async () => { calls++; throw apiError(403, 400002); } };
     const r = await t.run(rest);
     assert.equal(r.aborted, 'invite_stopped');
     assert.equal(calls, 1); // 最初の1件で中断
+});
+
+test('40002 は中断コードに含めない（過剰中断しない）', async () => {
+    const t = await setup();
+    await t.add('400000000000000001');
+    await t.add('400000000000000002');
+    let calls = 0;
+    const rest = { put: async () => { calls++; throw apiError(400, 40002); } };
+    const r = await t.run(rest);
+    assert.equal(r.aborted, null);
+    assert.equal(calls, 2); // 中断せず全件処理
 });
 
 test('VERIFY_ROLE_IDS 設定時は参加後にロールを付与する', async () => {

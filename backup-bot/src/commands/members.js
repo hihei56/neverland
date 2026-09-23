@@ -115,6 +115,7 @@ function formatRejoin(r, roleId) {
     const detail = [];
     if (r.banned) detail.push(`BAN済み ${r.banned}`);
     if (r.accountDeleted) detail.push(`アカウント削除 ${r.accountDeleted}`);
+    if (r.userLimited) detail.push(`アカウント制限 ${r.userLimited}`);
     if (r.guildLimit) detail.push(`参加上限 ${r.guildLimit}`);
     if (r.revoked) detail.push(`連携解除/失効 ${r.revoked}`);
     if (r.rateLimited) detail.push(`レート制限 ${r.rateLimited}`);

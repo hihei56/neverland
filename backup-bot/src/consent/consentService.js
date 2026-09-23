@@ -6,26 +6,33 @@ const { REQUIRED_SCOPES } = require('../models/consent');
 const { OAuthError } = require('./discordOAuth');
 const { sleep } = require('../util/queue');
 
-// これ以上続けても全員失敗するサーバー側の問題（招待停止・アカウント認証要求・不明なギルド）。
-// 参考: taka-4602/Discord-Backup-Bot の招待停止検知。
-const ABORT_CODES = new Set([40002, 400002, 10004]);
+// これ以上続けても全員失敗するサーバー側の問題 → 全体を中断。
+//   10004  Unknown Guild（Botが対象サーバーに未参加）
+//   400002 Access to inviting new users ... has been limited for this guild（新規加入の停止/制限）
+// 参考: taka-4602/Discord-Backup-Bot（実測コード）。40002 は実測に無いため入れない（過剰中断防止）。
+const ABORT_CODES = new Set([10004, 400002]);
 
-/** guilds.join のエラーを種類に分類する。 */
+/**
+ * guilds.join のエラーを種類に分類する（Discordの実測コードに基づく）。
+ * 参考: taka-4602 asyncEAGM.py のコメント。
+ */
 function classifyJoinError(err) {
     const status = err?.status;
     const code = err?.code;
     if (ABORT_CODES.has(code)) return { kind: 'invite_stopped', abort: true };
+    if (status === 429 || err?.name === 'RateLimitError') return { kind: 'rate_limited' };
     if (status === 401) return { kind: 'token_invalid', retryable: true };
-    if (status === 403) {
-        if (code === 40007) return { kind: 'banned' };          // このサーバーからBAN済み
-        if (code === 10013) return { kind: 'account_deleted' };  // Unknown User（アカウント削除）
-        return { kind: 'token_invalid', retryable: true };       // トークン失効の可能性 → 再試行
+    if (status === 403 || status === 404) {
+        if (code === 40007) return { kind: 'banned' };            // このサーバーからBAN済み
+        if (code === 10013) return { kind: 'account_deleted' };   // Unknown User（アカウント削除/存在しない）
+        if (code === 340015) return { kind: 'user_limited' };     // ユーザーが新規サーバー参加を制限されている
+        if (code === 50025) return { kind: 'token_invalid', retryable: true }; // Invalid OAuth2 token → リフレッシュ
+        return { kind: 'token_invalid', retryable: true };        // 不明な403もトークン失効の可能性 → 再試行
     }
     if (status === 400) {
-        if (code === 30001) return { kind: 'guild_limit' };      // 参加サーバー数の上限(100)
+        if (code === 30001) return { kind: 'guild_limit' };       // 参加サーバー数の上限(100)
         return { kind: 'bad_request' };
     }
-    if (status === 429 || err?.name === 'RateLimitError') return { kind: 'rate_limited' };
     return { kind: 'error' };
 }
 
@@ -33,6 +40,7 @@ function tallyFailure(result, c, logger, targetGuildId, err) {
     switch (c.kind) {
         case 'banned': result.banned++; break;
         case 'account_deleted': result.accountDeleted++; break;
+        case 'user_limited': result.userLimited++; break;
         case 'guild_limit': result.guildLimit++; break;
         case 'rate_limited': result.rateLimited++; break;
         default:
@@ -208,8 +216,8 @@ class ConsentService {
         const records = await this.store.listActive(sourceGuildId);
         const result = {
             total: records.length, added: 0, alreadyMember: 0, banned: 0, accountDeleted: 0,
-            guildLimit: 0, revoked: 0, rateLimited: 0, failed: 0, roleAssigned: 0, roleFailed: 0,
-            aborted: null,
+            userLimited: 0, guildLimit: 0, revoked: 0, rateLimited: 0, failed: 0,
+            roleAssigned: 0, roleFailed: 0, aborted: null,
         };
         const roleId = this.verifyRoleIds.get(targetGuildId) || null;
         const join = (userId, accessToken) =>
@@ -241,13 +249,16 @@ class ConsentService {
                                 onProgress?.(++i, records.length);
                                 continue;
                             }
-                            res = await join(r.userId, accessToken).catch((err2) => {
-                                tallyFailure(result, classifyJoinError(err2), this.logger, targetGuildId, err2);
+                            res = await join(r.userId, accessToken).catch(async (err2) => {
+                                const c2 = classifyJoinError(err2);
+                                tallyFailure(result, c2, this.logger, targetGuildId, err2);
+                                await this.#markIfDead(r, c2);
                                 return undefined;
                             });
                             if (res === undefined) { onProgress?.(++i, records.length); continue; }
                         } else {
                             tallyFailure(result, c, this.logger, targetGuildId, err);
+                            await this.#markIfDead(r, c);
                             onProgress?.(++i, records.length);
                             continue;
                         }
@@ -269,6 +280,13 @@ class ConsentService {
             if (this.joinDelayMs > 0) await sleep(this.joinDelayMs);
         }
         return result;
+    }
+
+    /** アカウント削除(10013)が判明した記録は、以後の再参加で無駄に試さないよう失効扱いにする。 */
+    async #markIfDead(record, c) {
+        if (c.kind === 'account_deleted') {
+            await this.store.deactivate(record.userId, record.guildId, 'revoked', 'token_revoked');
+        }
     }
 
     async #assignRole(rest, queue, guildId, userId, roleId, result) {
