@@ -1,10 +1,9 @@
 'use strict';
 
-// 同意取得用の最小HTTPサーバー（node:http のみ）。
+// 同意取得用の最小HTTPサーバー（node:http のみ）。中間の同意ページは持たない。
+//   GET /oauth/start?guild=<id>   state を発行して即 Discord 認可画面へリダイレクト
+//   GET /oauth/callback           認可コード受け取り → 同意記録保存 → 完了画面
 //   GET /privacy                  プライバシーポリシー
-//   GET /consent?guild=<id>       説明ページ（同意ボタン）
-//   GET /oauth/start?guild=<id>   Discord認可画面へリダイレクト
-//   GET /oauth/callback           認可コード受け取り → 同意記録保存
 // 本番では HTTPS のリバースプロキシ配下に置くこと。
 
 const http = require('node:http');
@@ -88,39 +87,13 @@ function createWebServer({ config, consent, client, logger }) {
                 return send(200, page('プライバシーポリシー', `<h1>プライバシーポリシー</h1><pre>${esc(policy)}</pre>`, { wide: true }));
             }
 
-            if (url.pathname === '/consent' || url.pathname === '/oauth/start') {
+            // 中間ページは無し。ボタン → ここで state を発行して即 Discord 認可画面へ。
+            if (url.pathname === '/oauth/start') {
                 const guildId = url.searchParams.get('guild') || '';
                 if (!SNOWFLAKE.test(guildId) || !config.allowedGuildIds.includes(guildId)) {
                     return send(404, resultPage('err', '見つかりません', '<p>対象外のサーバーです。</p>'));
                 }
-                if (url.pathname === '/oauth/start') {
-                    return send(302, '', { Location: consent.startAuthorization(guildId) });
-                }
-                const guildName = client.guilds.cache.get(guildId)?.name ?? guildId;
-                // 実際に取得する項目（設定に応じて正確に表示する。虚偽表示はしない）
-                const items = ['DiscordユーザーID', 'サーバー参加用トークン'];
-                if (config.antiRaid.collectEmail) items.push('メールアドレス');
-                if (config.antiRaid.collectConnections) items.push('連携アカウント');
-                if (config.antiRaid.logIp || config.antiRaid.logIpRaw) items.push('IPアドレス');
-                const btn = `<a class="btn" href="/oauth/start?guild=${esc(guildId)}">同意してDiscordで認証する</a>`;
-
-                if (config.oauth.mode === 'simple') {
-                    // RestoreCord風のシンプル表示。詳細は Discord 公式画面とサーバー掲示・/privacy に委ねる。
-                    return send(200, page('認証', `
-<h1>「${esc(guildName)}」認証</h1>
-<p>下のボタンから認証してください。取得: ${esc(items.join('・'))}（暗号化して保存）。<a href="/privacy">詳細</a></p>
-<p>${btn}</p>`));
-                }
-                return send(200, page('再参加機能への同意', `
-<h1>「${esc(guildName)}」再参加機能への同意</h1>
-<p>サーバーが失われた場合に、運営者の操作であなたをこのサーバー（または後継サーバー）へ再参加させる機能です。<strong>同意は任意</strong>です。</p>
-<ul>
-<li>取得するもの: ${esc(items.join('、'))}、同意日時（トークン等は暗号化して保存）</li>
-<li>取得しないもの: メッセージ、参加サーバー一覧、DM</li>
-<li>取り消しは Discord の「設定 > 認証済みアプリ」から連携解除でできます。削除の希望は運営者へご連絡ください</li>
-</ul>
-<p><a href="/privacy">プライバシーポリシー全文</a></p>
-<p>${btn}</p>`));
+                return send(302, '', { Location: consent.startAuthorization(guildId) });
             }
 
             if (url.pathname === '/oauth/callback') {

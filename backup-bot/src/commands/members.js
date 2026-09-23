@@ -1,7 +1,7 @@
 'use strict';
 
 const crypto = require('node:crypto');
-const { MessageFlags, PermissionFlagsBits } = require('discord.js');
+const { MessageFlags, PermissionFlagsBits, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { requireOwnerAdmin, withGuildLock } = require('./guard');
 const { SNOWFLAKE } = require('../models/backup');
 
@@ -14,17 +14,19 @@ async function handleMembers(interaction, app) {
 
     try {
         if (sub === 'consent-link') {
-            const url = `${app.config.oauth.publicBaseUrl}/consent?guild=${interaction.guildId}`;
-            // 公開で案内する。強制・報酬付与はしないこと（任意の同意であることを明記）。
+            // ボタンを押すと /oauth/start（stateを発行して即Discord認可へ）が開く。中間ページは無し。
+            const url = `${app.config.oauth.publicBaseUrl}/oauth/start?guild=${interaction.guildId}`;
+            const row = new ActionRowBuilder().addComponents(
+                new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('認証する').setURL(url),
+            );
+            // 強制・報酬付与はしないこと（任意の認証であることを明記）。
             return await interaction.reply({
                 content: [
-                    '📋 **サーバー再参加機能（任意）**',
-                    'サーバーが消えてしまった場合に、新しいサーバーへ自動で再参加できるようにする機能です。',
-                    '希望する人だけ、以下から内容を確認して同意してください。同意しなくても何も変わりません。',
-                    url,
-                    `プライバシーポリシー: ${app.config.oauth.publicBaseUrl}/privacy`,
-                    '取り消しは Discord の「設定 > 認証済みアプリ」から連携解除でできます。データ削除の希望は管理者までご連絡ください。',
+                    '📋 **サーバー再参加の認証（任意）**',
+                    'サーバーが消えても新しいサーバーへ再参加できるようにする機能です。ボタンから認証してください（任意）。',
+                    `詳細: ${app.config.oauth.publicBaseUrl}/privacy`,
                 ].join('\n'),
+                components: [row],
             });
         }
 

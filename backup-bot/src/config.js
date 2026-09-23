@@ -33,12 +33,6 @@ function pairMap(name) {
 
 function loadConfig() {
     const oauthEnabled = process.env.OAUTH_ENABLED === 'true';
-    // strict: Web同意ページ + プライバシーポリシー掲示 + 明示チェック（既定）
-    // simple: DiscordのOAuth認可画面自体を同意とみなす軽量運用（RestoreCord風）。
-    //         どちらのモードでも オプトアウト/削除・参加先はALLOWED_GUILD_IDS限定・
-    //         トークン暗号化・レート制限 は必ず維持する。
-    const consentMode = process.env.CONSENT_MODE === 'simple' ? 'simple' : 'strict';
-
     const config = {
         token: required('DISCORD_TOKEN'),
         clientId: required('DISCORD_CLIENT_ID'),
@@ -54,7 +48,6 @@ function loadConfig() {
 
         oauth: {
             enabled: oauthEnabled,
-            mode: consentMode,
             clientSecret: oauthEnabled ? required('DISCORD_CLIENT_SECRET') : null,
             publicBaseUrl: oauthEnabled ? required('PUBLIC_BASE_URL').replace(/\/$/, '') : null,
             httpPort: Number(process.env.HTTP_PORT || 3000),

@@ -38,7 +38,7 @@ backup-bot/
 │   │   ├── planner.js            差分から復元プランを作る（API を呼ばない純粋関数）
 │   │   └── executor.js           プランを実行し、復元ログを保存
 │   ├── consent/                  OAuth2 同意・暗号化・削除・再参加・荒らし対策取得
-│   ├── web/server.js             同意ページ・プライバシーポリシー・OAuth コールバック
+│   ├── web/server.js             OAuth 開始→認可へ即リダイレクト・完了画面・プライバシーポリシー
 │   ├── commands/                 スラッシュコマンドの定義とハンドラ
 │   ├── util/                     ロガー、キューとリトライ
 │   └── scripts/registerCommands.js
@@ -100,9 +100,11 @@ npm test
 
 `OAUTH_ENABLED=true` にすると有効になります。
 
-1. `/members consent-link` で同意ページを案内する。同意は任意であることを明記する
-2. 希望した人が説明を読み、Discord の認可画面で `identify guilds.join` を許可する
+1. `/members consent-link` で「認証する」ボタンを投稿する（案内は任意であることを明記）
+2. 希望した人がボタンを押すと、中間ページ無しで Discord の認可画面（`identify guilds.join`）が直接開く。許可すると完了画面が出る
 3. サーバーを作り直したら、新しいサーバーで `/members rejoin source_guild:<元のID>` を実行する（dry-run）。表示された確認コードを付けて、もう一度実行する
+
+利用者が見る Web ページは、認証後の完了画面（と任意で `/privacy`）だけです。同意内容は Discord 公式の認可画面が表示します。
 
 再参加の実行では、結果を種類ごとに集計します（新規参加・参加済み・BAN済み・アカウント削除・参加上限・連携解除/失効・レート制限・その他失敗）。参加が失効・権限エラーで失敗した場合は1回だけトークンをリフレッシュして再試行します。サーバー側で招待が停止されている場合は全体を中断します。`VERIFY_ROLE_IDS` を設定していれば、参加後にそのロールを付与します。
 
@@ -120,7 +122,6 @@ npm test
 
 - `VERIFY_COLLECT_EMAIL` / `VERIFY_COLLECT_CONNECTIONS`：メール・連携アカウントを暗号化保存
 - `VERIFY_LOG_IP`：認証時の IP を HMAC ハッシュで記録（同一 IP の複数アカウント検出用。生 IP は残さない）／`VERIFY_LOG_IP_RAW` で生 IP を暗号化保存
-- `CONSENT_MODE=simple`：同意ページを RestoreCord 風のシンプル表示にする（参加先の限定・削除・暗号化・レート制限は維持）
 
 ## レート制限とエラー
 
