@@ -53,6 +53,9 @@ function loadConfig() {
             httpPort: Number(process.env.HTTP_PORT || 3000),
             // AES-256-GCM 用の32バイト鍵（64桁のhex）。OAuthトークンは必ず暗号化して保存する。
             encryptionKey: oauthEnabled ? required('TOKEN_ENCRYPTION_KEY') : null,
+            // リバースプロキシ配下のときだけ true。X-Forwarded-For を信用する（IP判定・レート制限用）。
+            // false のまま公開すると XFF を偽装できるので、プロキシの後ろに置く場合のみ有効化する。
+            trustProxy: process.env.TRUST_PROXY === 'true',
         },
         members: {
             // 再参加/認証時に付与するロール（任意）。"guildId:roleId,..." 形式。

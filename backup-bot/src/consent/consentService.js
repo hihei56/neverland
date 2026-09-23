@@ -83,6 +83,8 @@ class ConsentService {
     startAuthorization(guildId) {
         if (!this.allowed.has(guildId)) throw new Error('対象外のサーバーです');
         this.#gcStates();
+        // 未完了 state を無制限に貯めないための上限（連打によるメモリ枯渇対策）。
+        if (this.states.size >= 20_000) throw new Error('混雑しています。しばらくしてから再度お試しください');
         const state = crypto.randomBytes(24).toString('base64url');
         this.states.set(state, { guildId, expires: Date.now() + 10 * 60_000 });
         return this.oauth.authorizeUrl(state, this.scopes());
@@ -282,8 +284,9 @@ class ConsentService {
     async #validAccessToken(record, force = false) {
         if (!record.tokens) return null;
         if (!force && !needsRefresh(record.tokens)) return this.cipher.decrypt(record.tokens.accessToken);
-        // 同じユーザーの更新は1本にまとめる（同時に更新すると片方が invalid_grant になるため）
-        const key = `${record.userId}:${record.guildId}`;
+        // 同じユーザーの更新は1本にまとめる（同時に更新すると片方が invalid_grant になるため）。
+        // force はキーに含める（非強制の在庫が進行中でも、強制側は必ず更新を試みる）。
+        const key = `${record.userId}:${record.guildId}:${force ? 'F' : 'N'}`;
         let pending = this.refreshing.get(key);
         if (!pending) {
             pending = this.#refresh(record.userId, record.guildId, force).finally(() => this.refreshing.delete(key));

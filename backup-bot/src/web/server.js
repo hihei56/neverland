@@ -64,8 +64,42 @@ function resultPage(kind, title, bodyHtml) {
     return page(title, `<div class="badge ${kind}">${ICON[kind]}</div><h1>${esc(title)}</h1>${bodyHtml}`);
 }
 
+// 固定ウィンドウのレート制限（IPごと）。メモリは自動でGCし、上限も設ける。
+class InboundLimiter {
+    constructor({ windowMs = 60_000, max = 120 } = {}) {
+        this.windowMs = windowMs;
+        this.max = max;
+        this.hits = new Map();
+    }
+
+    /** @returns {number} 0=許可、正の値=待つべき秒数 */
+    check(key, now = Date.now()) {
+        let h = this.hits.get(key);
+        if (!h || h.reset <= now) {
+            h = { count: 0, reset: now + this.windowMs };
+            this.hits.set(key, h);
+        }
+        h.count++;
+        if (this.hits.size > 50_000) {
+            for (const [k, v] of this.hits) if (v.reset <= now) this.hits.delete(k);
+        }
+        return h.count > this.max ? Math.ceil((h.reset - now) / 1000) : 0;
+    }
+}
+
+function clientIp(req, trustProxy) {
+    if (trustProxy) {
+        const xff = req.headers['x-forwarded-for'];
+        if (typeof xff === 'string' && xff) return xff.split(',')[0].trim();
+    }
+    return req.socket.remoteAddress || 'unknown';
+}
+
 function createWebServer({ config, consent, client, logger }) {
     const policy = privacyPolicyText({ ...config.privacy, antiRaid: config.antiRaid });
+    // 流入レート制限（IPごと・固定ウィンドウ）。全体は緩め、OAuth開始は厳しめ。
+    const general = new InboundLimiter({ windowMs: 60_000, max: 120 });
+    const oauth = new InboundLimiter({ windowMs: 60_000, max: 15 });
 
     const server = http.createServer(async (req, res) => {
         const send = (status, html, headers = {}) => {
@@ -79,9 +113,16 @@ function createWebServer({ config, consent, client, logger }) {
             });
             res.end(html);
         };
+        const ip = clientIp(req, config.oauth.trustProxy);
         try {
             const url = new URL(req.url, config.oauth.publicBaseUrl);
             if (req.method !== 'GET') return send(405, resultPage('err', 'エラー', '<p>Method Not Allowed</p>'));
+
+            const gWait = general.check(ip);
+            if (gWait) return send(429, 'Too Many Requests', { 'Retry-After': String(gWait), 'Content-Type': 'text/plain; charset=utf-8' });
+            if ((url.pathname === '/oauth/start' || url.pathname === '/oauth/callback') && oauth.check(ip)) {
+                return send(429, 'Too Many Requests', { 'Retry-After': '60', 'Content-Type': 'text/plain; charset=utf-8' });
+            }
 
             if (url.pathname === '/privacy') {
                 return send(200, page('プライバシーポリシー', `<h1>プライバシーポリシー</h1><pre>${esc(policy)}</pre>`, { wide: true }));
@@ -107,8 +148,7 @@ function createWebServer({ config, consent, client, logger }) {
                 let result;
                 try {
                     // 荒らし対策でIPを記録する設定のときのみ使用（既定は記録しない）。
-                    const xff = req.headers['x-forwarded-for'];
-                    const ip = (typeof xff === 'string' && xff ? xff.split(',')[0].trim() : req.socket.remoteAddress) || null;
+                    // TRUST_PROXY=true のときだけ XFF を信用（clientIp で処理済み）。
                     result = await consent.completeAuthorization(code, state, { ip });
                 } catch (err) {
                     logger.warn('oauth callback failed', { error: err });
@@ -127,13 +167,16 @@ function createWebServer({ config, consent, client, logger }) {
         }
     });
 
-    return {
+    const api = {
+        port: null,
         start: () => new Promise((resolve) => server.listen(config.oauth.httpPort, () => {
-            logger.info('http server listening', { port: config.oauth.httpPort });
+            api.port = server.address().port;
+            logger.info('http server listening', { port: api.port });
             resolve();
         })),
         close: () => new Promise((resolve) => server.close(() => resolve())),
     };
+    return api;
 }
 
 module.exports = { createWebServer };

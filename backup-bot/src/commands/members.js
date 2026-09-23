@@ -53,7 +53,8 @@ async function handleMembers(interaction, app) {
             if (interaction.options.getString('confirm', true) !== userId) {
                 return await interaction.editReply('確認用の入力が user_id と一致しません。削除していません。');
             }
-            const removed = await app.consent.deleteAll(userId);
+            // 同ギルドの rejoin/export と直列化（削除中の競合を避ける）
+            const removed = await withGuildLock(interaction.guildId, () => app.consent.deleteAll(userId));
             app.logger.info('member forgotten by admin', { userId, removed, by: interaction.user.id });
             return await interaction.editReply(
                 removed ? `🗑️ ユーザー \`${userId}\` の同意・トークン・取得情報をすべて削除しました。` : '該当ユーザーの記録はありませんでした。',
