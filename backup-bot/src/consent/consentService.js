@@ -98,6 +98,20 @@ class ConsentService {
         return this.oauth.authorizeUrl(state, this.scopes());
     }
 
+        /**
+     * ボタン用：Discord 認可 URL を直接返す（外部ドメイン警告を避ける）。
+     * state の TTL は 24 時間（ユーザーが後からボタンを押せるように）。
+     */
+    directAuthorizeUrl(guildId) {
+        if (!this.allowed.has(guildId)) throw new Error('対象外のサーバーです');
+        this.#gcStates();
+        if (this.states.size >= 20_000) throw new Error('混雑しています。しばらくしてから再度お試しください');
+        const state = crypto.randomBytes(24).toString('base64url');
+        this.states.set(state, { guildId, expires: Date.now() + 24 * 60 * 60_000 });
+        return this.oauth.authorizeUrl(state, this.scopes());
+    }
+
+
     /**
      * OAuthコールバック処理。成功時は同意記録を保存する。
      * @param {string} code
