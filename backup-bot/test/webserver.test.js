@@ -74,8 +74,20 @@ test('TRUST_PROXY=false のとき X-Forwarded-For を信用しない（偽装で
     } finally { await web.close(); }
 });
 
-test('state 上限を超えると混雑エラー', () => {
+test('認証リンクは永続（state=guildId・期限切れなし・再利用可能）', () => {
+    // state をそのまま URL に載せるスタブで、渡される state を確認する
+    const consent = new ConsentService({
+        store: null, cipher: createCipher(crypto.randomBytes(32).toString('hex')),
+        oauth: { authorizeUrl: (state) => `https://discord.com/oauth2/authorize?state=${state}` },
+        policyVersion: 'v1', allowedGuildIds: [G], logger: silent,
+    });
+    const a = new URL(consent.startAuthorization(G)).searchParams.get('state');
+    const b = new URL(consent.startAuthorization(G)).searchParams.get('state');
+    assert.equal(a, G, 'state はギルドIDそのもの');
+    assert.equal(a, b, '毎回同じ = リンクが永続・再利用できる');
+});
+
+test('対象外ギルドの state は拒否する', async () => {
     const consent = makeConsent();
-    for (let i = 0; i < 20_000; i++) consent.states.set(`s${i}`, { guildId: G, expires: Date.now() + 600_000 });
-    assert.throws(() => consent.startAuthorization(G), /混雑/);
+    await assert.rejects(() => consent.completeAuthorization('code', '999999999999999999'), /無効|やり直/);
 });

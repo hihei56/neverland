@@ -1,6 +1,5 @@
 'use strict';
 
-const crypto = require('node:crypto');
 const { Routes } = require('discord.js');
 const { REQUIRED_SCOPES } = require('../models/consent');
 const { OAuthError } = require('./discordOAuth');
@@ -74,8 +73,6 @@ class ConsentService {
             logIp: Boolean(antiRaid.logIp) || Boolean(antiRaid.logIpRaw),
             logIpRaw: Boolean(antiRaid.logIpRaw),
         };
-        /** state -> { guildId, expires } （CSRF対策、10分で失効） */
-        this.states = new Map();
         /** userId:guildId -> 実行中のトークン更新 */
         this.refreshing = new Map();
     }
@@ -90,12 +87,11 @@ class ConsentService {
 
     startAuthorization(guildId) {
         if (!this.allowed.has(guildId)) throw new Error('対象外のサーバーです');
-        this.#gcStates();
-        // 未完了 state を無制限に貯めないための上限（連打によるメモリ枯渇対策）。
-        if (this.states.size >= 20_000) throw new Error('混雑しています。しばらくしてから再度お試しください');
-        const state = crypto.randomBytes(24).toString('base64url');
-        this.states.set(state, { guildId, expires: Date.now() + 10 * 60_000 });
-        return this.oauth.authorizeUrl(state, this.scopes());
+        // state = guildId 固定（RestoreCord方式）。ボタンのリンクが永続化され、
+        // Bot再起動後や後から押しても切れない・複数人が同時に使える。
+        // CSRF保護は弱くなるが、認証ゲート用途では実害が小さいためUX（切れないリンク）を優先。
+        // 対象ギルドは allowed で限定し、コールバック側でも再検証する。
+        return this.oauth.authorizeUrl(guildId, this.scopes());
     }
 
     /**
@@ -105,9 +101,9 @@ class ConsentService {
      * @param {{ ip?: string|null }} [meta] 荒らし対策でIPを記録する場合のみ使用
      */
     async completeAuthorization(code, state, meta = {}) {
-        const s = this.states.get(state);
-        this.states.delete(state);
-        if (!s || s.expires < Date.now()) throw new Error('リンクの有効期限が切れています。最初からやり直してください');
+        // state = guildId（RestoreCord方式・永続リンク）。Mapは使わず、対象ギルドを再検証する。
+        const guildId = String(state);
+        if (!this.allowed.has(guildId)) throw new Error('リンクが無効です。最初からやり直してください');
 
         const token = await this.oauth.exchangeCode(code);
         const granted = String(token.scope || '').split(' ');
@@ -122,7 +118,7 @@ class ConsentService {
         const now = new Date().toISOString();
         await this.store.upsert({
             userId: user.id,
-            guildId: s.guildId,
+            guildId,
             scopes: granted,
             policyVersion: this.policyVersion,
             consentedAt: now,
@@ -131,8 +127,8 @@ class ConsentService {
             tokens: this.#encryptTokens(token),
             profile,
         }, 'granted');
-        this.logger.info('consent granted', { guildId: s.guildId, collected: Object.keys(profile ?? {}) });
-        return { userId: user.id, guildId: s.guildId, username: user.username || null, ipHash: profile?.ipHash || null };
+        this.logger.info('consent granted', { guildId, collected: Object.keys(profile ?? {}) });
+        return { userId: user.id, guildId, username: user.username || null, ipHash: profile?.ipHash || null };
     }
 
     /**
@@ -436,10 +432,6 @@ class ConsentService {
         }
     }
 
-    #gcStates() {
-        const now = Date.now();
-        for (const [k, v] of this.states) if (v.expires < now) this.states.delete(k);
-    }
 }
 
 /** 期限の1時間前からはリフレッシュする */
