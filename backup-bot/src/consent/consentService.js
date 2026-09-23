@@ -102,15 +102,12 @@ class ConsentService {
      * ボタン用：Discord 認可 URL を直接返す（外部ドメイン警告を避ける）。
      * state の TTL は 24 時間（ユーザーが後からボタンを押せるように）。
      */
-    directAuthorizeUrl(guildId) {
+       directAuthorizeUrl(guildId) {
+        // state = guild_id 固定（RestoreCord方式）。複数人・再起動に強い。
+        // CSRF保護は弱くなるが、Discord直リンクで警告を出さないUXを優先。
         if (!this.allowed.has(guildId)) throw new Error('対象外のサーバーです');
-        this.#gcStates();
-        if (this.states.size >= 20_000) throw new Error('混雑しています。しばらくしてから再度お試しください');
-        const state = crypto.randomBytes(24).toString('base64url');
-        this.states.set(state, { guildId, expires: Date.now() + 24 * 60 * 60_000 });
-        return this.oauth.authorizeUrl(state, this.scopes());
+        return this.oauth.authorizeUrl(guildId, this.scopes());
     }
-
 
     /**
      * OAuthコールバック処理。成功時は同意記録を保存する。
@@ -118,10 +115,12 @@ class ConsentService {
      * @param {string} state
      * @param {{ ip?: string|null }} [meta] 荒らし対策でIPを記録する場合のみ使用
      */
-    async completeAuthorization(code, state, meta = {}) {
-        const s = this.states.get(state);
-        this.states.delete(state);
-        if (!s || s.expires < Date.now()) throw new Error('リンクの有効期限が切れています。最初からやり直してください');
+       async completeAuthorization(code, state, meta = {}) {
+        // state = guild_id（RestoreCord方式）。Mapを使わない。
+        const guildId = String(state);
+        if (!this.allowed.has(guildId)) {
+            throw new Error('リンクの有効期限が切れています。最初からやり直してください');
+        }
 
         const token = await this.oauth.exchangeCode(code);
         const granted = String(token.scope || '').split(' ');
@@ -136,7 +135,7 @@ class ConsentService {
         const now = new Date().toISOString();
         await this.store.upsert({
             userId: user.id,
-            guildId: s.guildId,
+            guildId,
             scopes: granted,
             policyVersion: this.policyVersion,
             consentedAt: now,
@@ -145,8 +144,8 @@ class ConsentService {
             tokens: this.#encryptTokens(token),
             profile,
         }, 'granted');
-        this.logger.info('consent granted', { guildId: s.guildId, collected: Object.keys(profile ?? {}) });
-        return { userId: user.id, guildId: s.guildId };
+        this.logger.info('consent granted', { guildId, collected: Object.keys(profile ?? {}) });
+        return { userId: user.id, guildId };
     }
 
     /**
