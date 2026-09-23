@@ -82,6 +82,9 @@ async function handleMembers(interaction, app) {
         }
 
         if (sub === 'rejoin') {
+            if (app.config.mode === 'link') {
+                return await interaction.editReply('⛔ link モードでは再参加は使えません（guilds.join を取得していないため）。APP_MODE=backup で有効になります。');
+            }
             const sourceGuildId = interaction.options.getString('source_guild') || interaction.guildId;
             if (!SNOWFLAKE.test(sourceGuildId) || !app.config.allowedGuildIds.includes(sourceGuildId)) {
                 return await interaction.editReply('source_guild が ALLOWED_GUILD_IDS に含まれていません。');

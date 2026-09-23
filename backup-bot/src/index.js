@@ -54,6 +54,7 @@ async function main() {
             antiRaid: config.antiRaid,
             verifyRoleIds: config.members.verifyRoleIds,
             joinDelayMs: config.members.joinDelayMs,
+            mode: config.mode,
             logger,
         });
         web = createWebServer({ config, consent: app.consent, client, logger });

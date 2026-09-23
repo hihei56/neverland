@@ -34,6 +34,9 @@ function pairMap(name) {
 function loadConfig() {
     const oauthEnabled = process.env.OAUTH_ENABLED === 'true';
     const config = {
+        // backup: 設定バックアップ＋メンバー再参加（既定）。
+        // link:   再参加なし。email/connections の収集のみ（guilds.join を要求しない）。
+        mode: process.env.APP_MODE === 'link' ? 'link' : 'backup',
         token: required('DISCORD_TOKEN'),
         clientId: required('DISCORD_CLIENT_ID'),
         // Botを操作できるユーザー（あなた自身）。空だと誰も管理コマンドを実行できない。

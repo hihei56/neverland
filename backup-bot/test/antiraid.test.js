@@ -152,3 +152,19 @@ test('describe: 生トークンは含めず、メタ情報とprofileを返す', 
     assert.ok(info.ipHash);
     assert.ok(!('accessToken' in info) && !('tokens' in info)); // 生トークンは含めない
 });
+
+test('linkモード: guilds.join を要求せず identify のみ必須', async () => {
+    const store = new ConsentStore(fs.mkdtempSync(path.join(os.tmpdir(), 'link-')));
+    const cipher = createCipher(crypto.randomBytes(32).toString('hex'));
+    const svc = new ConsentService({ store, cipher, oauth: fakeOAuth({ scope: 'identify email' }), policyVersion: 'v1', allowedGuildIds: [GID], antiRaid: { collectEmail: true }, mode: 'link', logger: silent });
+    assert.deepEqual(svc.scopes(), ['identify', 'email']);
+    // guilds.join が無くても保存できる（linkモードでは必須でない）
+    const state = new URL(svc.startAuthorization(GID)).searchParams.get('state');
+    await svc.completeAuthorization('code', state, {});
+    assert.notEqual(await store.get('300000000000000003', GID), null);
+});
+
+test('backupモード(既定): guilds.join が必須', () => {
+    const svc = new ConsentService({ store: null, cipher: createCipher(null, { plaintext: true }), oauth: { authorizeUrl: () => 'x' }, policyVersion: 'v1', allowedGuildIds: [GID], logger: silent });
+    assert.deepEqual(svc.requiredScopes(), ['identify', 'guilds.join']);
+});
