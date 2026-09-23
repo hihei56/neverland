@@ -136,6 +136,24 @@ class ConsentService {
     }
 
     /**
+     * 認証ボタンで OAuth 完了した直後に、認証ロールを即付与する（backup-bot を門番として使う場合）。
+     * VERIFY_ROLE_IDS にそのギルドの設定があるときのみ。ユーザーは対象ギルドの参加者である必要がある。
+     * @returns {Promise<{ granted: boolean, roleId: string|null }>}
+     */
+    async grantVerifyRole(client, guildId, userId) {
+        const roleId = this.verifyRoleIds.get(guildId) || null;
+        if (!roleId) return { granted: false, roleId: null };
+        try {
+            await client.rest.put(Routes.guildMemberRole(guildId, userId, roleId), { reason: 'OAuth 認証成功' });
+            this.logger.info('verify role granted', { guildId, userId, roleId });
+            return { granted: true, roleId };
+        } catch (err) {
+            this.logger.warn('verify role grant failed', { guildId, userId, roleId, error: err });
+            return { granted: false, roleId };
+        }
+    }
+
+    /**
      * 荒らし対策の追加情報を暗号化して返す（有効化された項目のみ）。
      * email/connections は個人情報なので暗号化、IPは既定でHMACハッシュのみ。
      */

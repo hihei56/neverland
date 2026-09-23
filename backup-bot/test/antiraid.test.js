@@ -153,3 +153,17 @@ test('describe: 生トークンは含めず、メタ情報とprofileを返す', 
     assert.ok(!('accessToken' in info) && !('tokens' in info)); // 生トークンは含めない
 });
 
+
+test('grantVerifyRole: 認証直後に認証ロールを即付与する', async () => {
+    const cipher = createCipher(null, { plaintext: true });
+    const svc = new ConsentService({ store: null, cipher, oauth: { authorizeUrl: () => 'x' }, policyVersion: 'v1', allowedGuildIds: [GID], verifyRoleIds: new Map([[GID, '900000000000000009']]), logger: silent });
+    const puts = [];
+    const client = { rest: { put: async (route) => { puts.push(route); } } };
+    const r = await svc.grantVerifyRole(client, GID, '300000000000000003');
+    assert.equal(r.granted, true);
+    assert.equal(r.roleId, '900000000000000009');
+    assert.ok(puts[0].includes('/roles/900000000000000009'));
+    // 未設定ギルドでは付与しない
+    const svc2 = new ConsentService({ store: null, cipher, oauth: {}, policyVersion: 'v1', allowedGuildIds: [GID], logger: silent });
+    assert.equal((await svc2.grantVerifyRole(client, GID, 'u')).granted, false);
+});

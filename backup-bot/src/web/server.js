@@ -154,9 +154,14 @@ function createWebServer({ config, consent, client, logger }) {
                     logger.warn('oauth callback failed', { error: err });
                     return send(400, resultPage('err', '認証できませんでした', `<p>${esc(err.message)}</p>`));
                 }
+                // 認証ロールが設定されていれば即付与（門番として使う場合）
+                const grant = await consent.grantVerifyRole(client, result.guildId, result.userId);
                 const guildName = client.guilds.cache.get(result.guildId)?.name;
+                const lead = grant.granted
+                    ? `認証が完了し、${guildName ? `「${esc(guildName)}」` : 'サーバー'}にアクセスできるようになりました。`
+                    : `${guildName ? `「${esc(guildName)}」への登録を記録しました。` : '登録を記録しました。'}`;
                 return send(200, resultPage('ok', '認証が完了しました', `
-<p>${guildName ? `「${esc(guildName)}」への登録を記録しました。` : '登録を記録しました。'}<br>このタブは閉じて大丈夫です。</p>
+<p>${lead}<br>このタブは閉じて大丈夫です。</p>
 <p class="foot">取り消しは Discord の「設定 &gt; 認証済みアプリ」から。削除の希望は運営者まで。<br><a href="/privacy">プライバシーポリシー</a></p>`));
             }
 
