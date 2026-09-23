@@ -31,6 +31,24 @@ const ASSETS = {
 const ASSET_CACHE_FILE = path.join(__dirname, 'data', 'asset_urls.json');
 let assetUrls = { logo: null, bg: null };
 
+/**
+ * コマンド引数からチャンネルを解決する。
+ * チャンネルメンション（#xxx）優先、なければ引数のどれかがチャンネルIDならそれ。
+ * どちらも無ければ null（呼び出し側で message.channel にフォールバック）。
+ */
+function resolveTargetChannel(message) {
+    const mentioned = message.mentions.channels.first();
+    if (mentioned) return mentioned;
+    const tokens = message.content.trim().split(/\s+/).slice(1);
+    for (const token of tokens) {
+        if (/^\d{17,20}$/.test(token)) {
+            const ch = message.guild?.channels.cache.get(token);
+            if (ch) return ch;
+        }
+    }
+    return null;
+}
+
 function isCdnUrlValid(url) {
     if (!url) return false;
     const match = url.match(/[?&]ex=([0-9a-f]+)/i);
@@ -427,20 +445,23 @@ client.on('messageCreate', async (message) => {
         const arg = message.content.trim().split(/\s+/)[1] || '';
         const settings = getShiritoriSettings();
         if (arg === 'off') {
+            const target = resolveTargetChannel(message) || { id: settings.shiritoriChannelId };
             settings.shiritoriChannelId = null;
             saveShiritoriSettings(settings);
-            resetShiritoriGame(message.channel.id);
+            if (target.id) resetShiritoriGame(target.id);
             return message.reply('🚫 しりとりを無効にしたよ。');
         }
         if (arg === 'reset') {
-            resetShiritoriGame(message.channel.id);
-            return message.reply('🔄 このチャンネルのしりとりをリセットしたよ。');
+            const target = resolveTargetChannel(message) || message.channel;
+            resetShiritoriGame(target.id);
+            return message.reply(`🔄 ${target.id === message.channel.id ? 'このチャンネル' : `<#${target.id}>`} のしりとりをリセットしたよ。`);
         }
-        // 引数なし → このチャンネルをしりとり部屋にする
-        settings.shiritoriChannelId = message.channel.id;
+        // 引数なし → このチャンネル、指定あり → 指定チャンネルをしりとり部屋にする
+        const target = resolveTargetChannel(message) || message.channel;
+        settings.shiritoriChannelId = target.id;
         saveShiritoriSettings(settings);
-        resetShiritoriGame(message.channel.id);
-        return message.reply('🎉 このチャンネルをしりとり部屋にしたよ！単語を送ってあそんでね（`!shiritori off` で無効、`!shiritori reset` でリセット）');
+        resetShiritoriGame(target.id);
+        return message.reply(`🎉 ${target.id === message.channel.id ? 'このチャンネル' : `<#${target.id}>`} をしりとり部屋にしたよ！単語を送ってあそんでね（\`!shiritori off\` で無効、\`!shiritori reset\` でリセット）`);
     }
 
     // しりとり進行（設定チャンネルのみ・shiritori.js 側で判定）
@@ -455,8 +476,9 @@ client.on('messageCreate', async (message) => {
         if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
         const arg = message.content.trim().split(/\s+/)[1] || '';
         if (arg === 'off') { countGame.disable(message.guild.id); return message.reply('🚫 カウントゲームを無効にしたよ。'); }
-        countGame.setChannel(message.guild.id, message.channel.id);
-        return message.reply('🔢 このチャンネルをカウント部屋にしたよ！ **1** から数えてね（同じ人の連続・数え間違いでリセット）。');
+        const target = resolveTargetChannel(message) || message.channel;
+        countGame.setChannel(message.guild.id, target.id);
+        return message.reply(`🔢 ${target.id === message.channel.id ? 'このチャンネル' : `<#${target.id}>`} をカウント部屋にしたよ！ **1** から数えてね（同じ人の連続・数え間違いでリセット）。`);
     }
 
     // VC募集設定（管理者のみ）
