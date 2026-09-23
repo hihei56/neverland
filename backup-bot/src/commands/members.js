@@ -63,6 +63,25 @@ async function handleMembers(interaction, app) {
 
         await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
+        if (sub === 'authlog') {
+            if (!app.authLogStore) return await interaction.editReply('認証ログ機能は利用できません。');
+            const off = interaction.options.getBoolean('off') ?? false;
+            const channel = interaction.options.getChannel('channel');
+            if (off) {
+                await app.authLogStore.clear(interaction.guildId);
+                app.logger.info('auth log disabled', { guildId: interaction.guildId, by: interaction.user.id });
+                return await interaction.editReply('🚫 認証ログを無効にしました。');
+            }
+            if (channel) {
+                if (!channel.isTextBased?.()) return await interaction.editReply('テキストチャンネルを指定してください。');
+                await app.authLogStore.set(interaction.guildId, channel.id);
+                app.logger.info('auth log channel set', { guildId: interaction.guildId, channelId: channel.id, by: interaction.user.id });
+                return await interaction.editReply(`✅ 認証ログを <#${channel.id}> に投稿します。`);
+            }
+            const current = await app.authLogStore.get(interaction.guildId);
+            return await interaction.editReply(current ? `現在の認証ログ投稿先: <#${current}>` : '認証ログは未設定です（`channel:` を指定して設定）。');
+        }
+
         if (sub === 'stats') {
             const n = await app.consent.countActive(interaction.guildId);
             return await interaction.editReply(`同意済み（有効）: ${n} 人`);

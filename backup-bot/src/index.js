@@ -10,6 +10,7 @@ const { handleBackup } = require('./commands/backup');
 const { handleMembers } = require('./commands/members');
 const { handleModeration } = require('./commands/moderation');
 const { ModerationStore } = require('./moderation/moderationStore');
+const { AuthLogStore } = require('./members/authLogStore');
 const { handleMessage: handleModerationMessage } = require('./moderation/moderator');
 const { createFloodTracker, StrikeStore, enforce: enforceSpam } = require('./moderation/spamEnforcer');
 
@@ -40,6 +41,7 @@ async function main() {
         repo: new BackupRepository(config.dataDir),
         queue: new TaskQueue({ intervalMs: config.queueIntervalMs, logger }),
         moderationStore: new ModerationStore(config.dataDir),
+        authLogStore: new AuthLogStore(config.dataDir, config.members.authLogChannelIds),
         flood: createFloodTracker(),
         strikes: new StrikeStore(config.dataDir),
         consent: null,
@@ -68,7 +70,7 @@ async function main() {
             joinDelayMs: config.members.joinDelayMs,
             logger,
         });
-        web = createWebServer({ config, consent: app.consent, client, logger });
+        web = createWebServer({ config, consent: app.consent, client, logger, authLogStore: app.authLogStore });
     }
 
     client.once(Events.ClientReady, async (c) => {

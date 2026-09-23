@@ -12,8 +12,8 @@ const { privacyPolicyText } = require('../consent/privacyPolicy');
 const { SNOWFLAKE } = require('../models/backup');
 
 /** 認証ログを指定チャンネルへ投稿する（設定されているギルドのみ）。 */
-async function postAuthLog(client, config, logger, { guildId, userId, username, granted, roleId, ipHash }) {
-    const channelId = config.members.authLogChannelIds.get(guildId);
+async function postAuthLog(client, authLogStore, logger, { guildId, userId, username, granted, roleId, ipHash }) {
+    const channelId = authLogStore ? await authLogStore.get(guildId) : null;
     if (!channelId) return;
     try {
         const channel = await client.channels.fetch(channelId).catch(() => null);
@@ -119,7 +119,7 @@ function clientIp(req, trustProxy) {
     return req.socket.remoteAddress || 'unknown';
 }
 
-function createWebServer({ config, consent, client, logger }) {
+function createWebServer({ config, consent, client, logger, authLogStore = null }) {
     const policy = privacyPolicyText({ ...config.privacy, antiRaid: config.antiRaid });
     // 流入レート制限（IPごと・固定ウィンドウ）。全体は緩め、OAuth開始は厳しめ。
     const general = new InboundLimiter({ windowMs: 60_000, max: 120 });
@@ -181,7 +181,7 @@ function createWebServer({ config, consent, client, logger }) {
                 // 認証ロールが設定されていれば即付与（門番として使う場合）
                 const grant = await consent.grantVerifyRole(client, result.guildId, result.userId);
                 // 認証ログ（設定されていれば投稿）。ログ失敗は完了画面に影響させない。
-                await postAuthLog(client, config, logger, {
+                await postAuthLog(client, authLogStore, logger, {
                     guildId: result.guildId,
                     userId: result.userId,
                     username: result.username,
