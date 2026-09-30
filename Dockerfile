@@ -18,6 +18,8 @@ COPY package*.json ./
 RUN npm ci --omit=dev
 
 COPY index.js dataPath.js ./
+COPY lib ./lib
+COPY features ./features
 
 # アセットと data は volume でマウント
 RUN mkdir -p assets data

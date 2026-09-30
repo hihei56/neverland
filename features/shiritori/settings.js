@@ -1,7 +1,7 @@
-// shiritori_settings.js — しりとりチャンネルIDの保存（shiritori.js が参照）
+// shiritori/settings.js — しりとりチャンネルIDの保存（game.js が参照）
 const path = require('path');
 const fs = require('fs');
-const { DATA_DIR } = require('./dataPath');
+const { DATA_DIR } = require('../../dataPath');
 
 const FILE = path.join(DATA_DIR, 'shiritori.json');
 

@@ -1,73 +1,64 @@
-// Neverland Authentication Bot
-// Private thread version + Logging + Reauth command
+// Neverland Bot — 起動と、各機能（features/）へのイベント振り分けだけを行う
+//
+// 機能モジュールの形（すべて省略可）:
+//   name                      機能名（ログ用）
+//   enabled()                 false なら読み込まない（例: auth は ENABLE_AUTH=true のときだけ）
+//   commands                  { '!cmd': { admin: true, run(message, args) } }
+//   help                      !help に出す [{ name, value }]
+//   onReady(client)           起動時
+//   onMessageEarly(message)   コマンド判定より先に全メッセージで実行（モデレーション用）
+//   onMessage(message)        コマンド以外のメッセージで実行（ゲーム進行など）
+//   onInteraction(i)          自分が処理したら true を返す
+//   onMemberAdd(member) / onMemberRemove(member)
+//
+// 新しい機能は features/<名前>/index.js を作って ALL_FEATURES に足す。
 
 require('dotenv').config();
 
-const {
-    Client,
-    GatewayIntentBits,
-    ChannelType,
-    PermissionFlagsBits,
-    EmbedBuilder,
-    ActionRowBuilder,
-    ButtonBuilder,
-    ButtonStyle,
-    AttachmentBuilder,
-} = require('discord.js');
-const fs = require('fs');
-const path = require('path');
-const { DATA_DIR, WHITELIST } = require('./dataPath');
-const { handleModerator, handleImageDeleteButton } = require('./moderator');
-const { initShiritori, handleShiritoriMessage, resetShiritoriGame } = require('./shiritori');
-const { getSettings: getShiritoriSettings, saveSettings: saveShiritoriSettings } = require('./shiritori_settings');
-const countGame = require('./count_game');
-const vcRecruit = require('./vc_recruit');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { parseCommand, isAdmin } = require('./lib/command');
 
-const ASSETS = {
-    logo: path.join(__dirname, 'assets/logo.png'),
-    bg: path.join(__dirname, 'assets/neverland_bg.png'),
-};
+const ALL_FEATURES = [
+    require('./features/moderation'),
+    require('./features/auth'),
+    require('./features/shiritori'),
+    require('./features/count'),
+    require('./features/vc_recruit'),
+];
 
-const ASSET_CACHE_FILE = path.join(__dirname, 'data', 'asset_urls.json');
-let assetUrls = { logo: null, bg: null };
+const features = ALL_FEATURES.filter((f) => (f.enabled ? f.enabled() : true));
 
-function isCdnUrlValid(url) {
-    if (!url) return false;
-    const match = url.match(/[?&]ex=([0-9a-f]+)/i);
-    if (!match) return true;
-    return Date.now() < parseInt(match[1], 16) * 1000 - 3600000;
+// コマンド名 → { feature, admin, run }
+const commands = new Map();
+for (const f of features) {
+    for (const [name, def] of Object.entries(f.commands || {})) {
+        if (commands.has(name)) throw new Error(`コマンド ${name} が ${commands.get(name).feature} と ${f.name} で重複しています`);
+        commands.set(name, { feature: f.name, admin: def.admin !== false, run: def.run });
+    }
 }
 
-async function initAssets(client) {
-    try {
-        if (fs.existsSync(ASSET_CACHE_FILE)) {
-            const cached = JSON.parse(fs.readFileSync(ASSET_CACHE_FILE, 'utf8'));
-            if (isCdnUrlValid(cached.logo) && isCdnUrlValid(cached.bg)) {
-                assetUrls = cached;
-                return;
-            }
+const HELP_COMMAND = { name: '`!help`', value: 'このヘルプを表示' };
+
+async function helpCommand(message) {
+    const fields = [...features.flatMap((f) => f.help || []), HELP_COMMAND];
+    return message.reply({ embeds: [new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle('📖 コマンド一覧')
+        .addFields(fields.slice(0, 25))] });
+}
+commands.set('!help', { feature: 'core', admin: true, run: helpCommand });
+
+/** 各機能のハンドラを順に呼ぶ。1つが落ちても他は続行する。 */
+async function each(hook, ...args) {
+    for (const f of features) {
+        if (!f[hook]) continue;
+        try {
+            await f[hook](...args);
+        } catch (err) {
+            console.error(`[${f.name}] ${hook} failed:`, err);
         }
-    } catch {}
-
-    const guild = client.guilds.cache.first();
-    if (!guild) return;
-    const logChannel = guild.channels.cache.get(CONFIG.LOG_CHANNEL_ID);
-    if (!logChannel) return;
-
-    const msg = await logChannel.send({
-        content: '🖼️',
-        files: [
-            new AttachmentBuilder(ASSETS.logo, { name: 'logo.png' }),
-            new AttachmentBuilder(ASSETS.bg, { name: 'neverland_bg.png' }),
-        ],
-    });
-
-    assetUrls.logo = msg.attachments.find(a => a.name === 'logo.png')?.url ?? null;
-    assetUrls.bg = msg.attachments.find(a => a.name === 'neverland_bg.png')?.url ?? null;
-    fs.writeFileSync(ASSET_CACHE_FILE, JSON.stringify(assetUrls));
+    }
 }
-
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
 
 const client = new Client({
     intents: [
@@ -80,551 +71,46 @@ const client = new Client({
     ],
 });
 
-const CONFIG = {
-    VERIFY_ROLE_ID: process.env.VERIFY_ROLE_ID,
-    VIP_ROLE_ID: process.env.VIP_ROLE_ID,
-    AUTH_CHANNEL_ID: process.env.AUTH_CHANNEL_ID,
-    WELCOME_CHANNEL_ID: process.env.WELCOME_CHANNEL_ID,
-    LOG_CHANNEL_ID: process.env.LOG_CHANNEL_ID,
-    LIMIT_SECONDS: 30,
-    NUMBER_COUNT: 5,
-    WHITELIST_FILE: WHITELIST,
-};
-
-const AGES = [
-    'आठ',     // 8
-    'नौ',      // 9
-    'दस',     // 10
-    'ग्यारह', // 11
-    'बारह',   // 12
-];
-
-const EMOJIS = ['🪄', '✨', '🌙', '⭐', '💫', '🌟', '🔮'];
-
-function buildPhrase() {
-    const age = AGES[Math.floor(Math.random() * AGES.length)];
-    const emoji = EMOJIS[Math.floor(Math.random() * EMOJIS.length)];
-    return `मैं ${age} साल का हूँ ${emoji}`;
-}
-
-function loadWhitelist() {
-    try {
-        if (!fs.existsSync(CONFIG.WHITELIST_FILE)) {
-            fs.writeFileSync(CONFIG.WHITELIST_FILE, '[]');
-        }
-        return JSON.parse(fs.readFileSync(CONFIG.WHITELIST_FILE, 'utf8'));
-    } catch {
-        return [];
-    }
-}
-
-function saveWhitelist(list) {
-    fs.writeFileSync(CONFIG.WHITELIST_FILE, JSON.stringify(list, null, 2));
-}
-
-let whitelist = loadWhitelist();
-const sessions = new Map();
-let authPaused = false;
-
-// ログ送信
-async function sendLog(guild, embed) {
-    const logChannel = guild.channels.cache.get(CONFIG.LOG_CHANNEL_ID);
-    if (!logChannel) return;
-    await logChannel.send({ embeds: [embed] }).catch(() => {});
-}
-
-async function logSuccess(member) {
-    await sendLog(member.guild, new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle('✅ にゅうこくせいこう')
-        .addFields(
-            { name: 'ユーザー', value: `${member} (${member.user.tag})`, inline: true },
-            { name: 'ID', value: member.id, inline: true },
-        )
-        .setThumbnail(member.user.displayAvatarURL())
-        .setTimestamp()
-    );
-}
-
-async function logFail(member, reason) {
-    const reasonText = reason === 'timeout' ? 'じかんぎれ' : reason === 'wrong' ? 'おまじないまちがい' : reason;
-    await sendLog(member.guild, new EmbedBuilder()
-        .setColor(0xED4245)
-        .setTitle('❌ にゅうこくしっぱい')
-        .addFields(
-            { name: 'ユーザー', value: `${member} (${member.user.tag})`, inline: true },
-            { name: 'ID', value: member.id, inline: true },
-            { name: 'りゆう', value: reasonText, inline: true },
-        )
-        .setThumbnail(member.user.displayAvatarURL())
-        .setTimestamp()
-    );
-}
-
-
-function getProgressBar(timeLeft, total) {
-    const filled = Math.max(0, Math.min(10, Math.round((timeLeft / total) * 10)));
-    return '█'.repeat(filled) + '░'.repeat(10 - filled);
-}
-
-function getColor(timeLeft) {
-    if (timeLeft <= 10) return 0xED4245;
-    if (timeLeft <= 20) return 0xFEE75C;
-    return 0x5865F2;
-}
-
-function buildNumberButtons(correctNumber) {
-    const numbers = new Set([correctNumber]);
-    while (numbers.size < CONFIG.NUMBER_COUNT) {
-        numbers.add(Math.floor(Math.random() * 90) + 10);
-    }
-
-    return new ActionRowBuilder().addComponents(
-        [...numbers]
-            .sort(() => Math.random() - 0.5)
-            .map((n) =>
-                new ButtonBuilder()
-                    .setCustomId(`numsel_${n}`)
-                    .setLabel(String(n))
-                    .setStyle(ButtonStyle.Secondary)
-            )
-    );
-}
-
-function buildStep1Embed(member, number, timeLeft, urls = {}) {
-    const embed = new EmbedBuilder()
-        .setColor(getColor(timeLeft))
-        .setTitle('🌙 ネバーランドのとびらまえ')
-        .setDescription(
-            `${member}、きてくれてありがとう！\n\n` +
-            `とびらをあけるには、ちいさなおまじないをこなしてね 🗝️`
-        )
-        .addFields(
-            { name: '🔢 かぎのばんごう', value: `\`${number}\``, inline: true },
-            {
-                name: '⏳ のこりじかん',
-                value: `${getProgressBar(timeLeft, CONFIG.LIMIT_SECONDS)} ${timeLeft}びょう`,
-                inline: true,
-            }
-        )
-        .setFooter({ text: 'したのボタンからえらんでね！' });
-    if (urls.logo) embed.setThumbnail(urls.logo);
-    if (urls.bg) embed.setImage(urls.bg);
-    return embed;
-}
-
-function buildStep2Embed(phrase, timeLeft, urls = {}) {
-    const embed = new EmbedBuilder()
-        .setColor(getColor(timeLeft))
-        .setTitle('✨ ふるいことばのちかい')
-        .setDescription(
-            'このふるいことばを、そっと唱えてみて 🌙\n' +
-            'このことばが、とびらを開く鍵だよ 🗝️'
-        )
-        .addFields(
-            { name: '🪄 おまじないのことば', value: `\`\`\`${phrase}\`\`\`` },
-            {
-                name: '⏳ のこりじかん',
-                value: `${getProgressBar(timeLeft, CONFIG.LIMIT_SECONDS)} ${timeLeft}びょう`,
-            }
-        )
-        .setFooter({ text: 'ことばの力は、一字一句に宿っているよ ✨' });
-    if (urls.logo) embed.setThumbnail(urls.logo);
-    if (urls.bg) embed.setImage(urls.bg);
-    return embed;
-}
-
-async function startAuth(member) {
-    const phrase = buildPhrase();
-    const number = Math.floor(Math.random() * 90) + 10;
-
-    const authChannel = member.guild.channels.cache.get(CONFIG.AUTH_CHANNEL_ID);
-    if (!authChannel) return;
-
-    const thread = await authChannel.threads.create({
-        name: `🔑 にゅうこくしんさ-${member.user.username}`,
-        autoArchiveDuration: 60,
-        type: ChannelType.PrivateThread,
-        reason: 'にゅうこくしんさ',
-    });
-
-    await thread.members.add(member.id);
-
-    const buttonRow = buildNumberButtons(number);
-
-    const message = await thread.send({
-        content: `${member}`,
-        embeds: [buildStep1Embed(member, number, CONFIG.LIMIT_SECONDS, assetUrls)],
-        components: [buttonRow],
-    });
-
-    const session = {
-        phrase,
-        number,
-        step: 1,
-        timeLeft: CONFIG.LIMIT_SECONDS,
-        message,
-        thread,
-        buttonRow,
-        timer: null,
-    };
-
-    sessions.set(member.id, session);
-
-    session.timer = setInterval(async () => {
-        const s = sessions.get(member.id);
-        if (!s) return;
-
-        s.timeLeft -= 3;
-
-        if (s.timeLeft <= 0) {
-            await failAuth(member, s, 'timeout');
-            return;
-        }
-
-        try {
-            await s.message.edit({
-                embeds: [
-                    s.step === 1
-                        ? buildStep1Embed(member, s.number, s.timeLeft, assetUrls)
-                        : buildStep2Embed(s.phrase, s.timeLeft, assetUrls),
-                ],
-                components: s.step === 1 ? [s.buttonRow] : [],
-            });
-        } catch {}
-    }, 3000);
-}
-
-async function failAuth(member, session, reason = 'timeout') {
-    if (!session) return;
-
-    clearInterval(session.timer);
-    sessions.delete(member.id);
-
-    await logFail(member, reason);
-
-    try {
-        await member.send({
-            embeds: [
-                new EmbedBuilder()
-                    .setColor(0xED4245)
-                    .setTitle('💦 にゅうこくできなかったよ')
-                    .setDescription(
-                        reason === 'timeout'
-                            ? 'じかんぎれになっちゃった！\nもういちどサーバーにはいってちょうせんしてね 🌙'
-                            : 'おまじないがちがったみたい…\nもういちどちょうせんしてね 💫'
-                    ),
-            ],
-        });
-    } catch {}
-
-    try { await session.thread.delete(); } catch {}
-    try { await member.kick('にゅうこくしっぱい'); } catch {}
-}
-
-async function successAuth(member, session) {
-    clearInterval(session.timer);
-    sessions.delete(member.id);
-
-    await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
-    await logSuccess(member);
-
-    const channel = member.guild.channels.cache.get(CONFIG.WELCOME_CHANNEL_ID)
-        || member.guild.channels.cache.get(CONFIG.AUTH_CHANNEL_ID);
-
-    if (!channel) return;
-
-    const welcomeEmbed = new EmbedBuilder()
-        .setColor(0x57F287)
-        .setTitle('🎉 ネバーランドへようこそ！')
-        .setDescription(
-            `${member} がなかまになったよ！\n` +
-            `みんなでなかよくしてね 🌟`
-        );
-    if (assetUrls.logo) welcomeEmbed.setThumbnail(assetUrls.logo);
-    if (assetUrls.bg) welcomeEmbed.setImage(assetUrls.bg);
-    await channel.send({ embeds: [welcomeEmbed] });
-}
-
-client.on('guildMemberAdd', async (member) => {
-    if (member.user.bot) return;
-
-    if (whitelist.includes(member.id)) {
-        await member.roles.add(CONFIG.VIP_ROLE_ID).catch(() => {});
-        return;
-    }
-
-    if (authPaused) {
-        await member.roles.add(CONFIG.VERIFY_ROLE_ID).catch(() => {});
-        console.log(`[AUTH PAUSE] ${member.user.tag}(${member.id}) 認証スキップで入国`);
-        return;
-    }
-
-    await startAuth(member);
-});
-
-client.on('guildMemberRemove', (member) => {
-    const session = sessions.get(member.id);
-    if (session) {
-        clearInterval(session.timer);
-        sessions.delete(member.id);
-    }
-});
+client.on('guildMemberAdd', (member) => each('onMemberAdd', member));
+client.on('guildMemberRemove', (member) => each('onMemberRemove', member));
 
 client.on('interactionCreate', async (interaction) => {
-    if (interaction.isButton() && interaction.customId.startsWith('del_img:')) {
-        return handleImageDeleteButton(interaction);
-    }
-
-    // VC募集ボタン
-    if (interaction.isButton() && interaction.customId === 'vc_recruit_ping') {
-        return vcRecruit.handleVcRecruitButton(interaction).catch((e) => console.error('[VcRecruit btn]', e));
-    }
-
-    // 「認証する」ボタン（!authpanel で設置）→ 呪文認証を開始する
-    if (interaction.isButton() && interaction.customId === 'start_auth') {
-        const member = interaction.member;
-        if (member.roles.cache.has(CONFIG.VERIFY_ROLE_ID) || whitelist.includes(member.id)) {
-            return interaction.reply({ content: '✅ もう認証済みだよ！', ephemeral: true });
+    for (const f of features) {
+        if (!f.onInteraction) continue;
+        try {
+            if (await f.onInteraction(interaction)) return;
+        } catch (err) {
+            console.error(`[${f.name}] onInteraction failed:`, err);
+            return;
         }
-        const existing = sessions.get(member.id);
-        if (existing) {
-            return interaction.reply({ content: '🔑 すでに認証中だよ。にゅうこくしんさスレッドをみてね。', ephemeral: true });
-        }
-        await interaction.reply({ content: '🔑 にゅうこくしんさスレッドをつくったよ！そちらをみてね。', ephemeral: true });
-        return startAuth(member).catch((err) => console.error('startAuth(button) failed', err));
     }
-
-    if (!interaction.isButton() || !interaction.customId.startsWith('numsel_')) return;
-
-    const session = sessions.get(interaction.user.id);
-    if (!session || session.step !== 1) {
-        return interaction.reply({ content: 'セッションがみつからないよ。もういちどためしてね。', ephemeral: true });
-    }
-
-    const selected = Number(interaction.customId.split('_')[1]);
-
-    if (selected !== session.number) {
-        await interaction.reply({ content: 'ばんごうがちがうよ💦', ephemeral: true });
-        return failAuth(interaction.member, session, 'wrong');
-    }
-
-    session.step = 2;
-
-    await interaction.update({
-        embeds: [buildStep2Embed(session.phrase, session.timeLeft)],
-        components: [],
-    });
 });
 
 client.on('messageCreate', async (message) => {
     if (message.author.bot) return;
-    await handleModerator(message).catch(console.error);
 
-    // しりとり設定コマンド（管理者のみ）
-    if (message.content.trim().startsWith('!shiritori')) {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        const arg = message.content.trim().split(/\s+/)[1] || '';
-        const settings = getShiritoriSettings();
-        if (arg === 'off') {
-            settings.shiritoriChannelId = null;
-            saveShiritoriSettings(settings);
-            resetShiritoriGame(message.channel.id);
-            return message.reply('🚫 しりとりを無効にしたよ。');
-        }
-        if (arg === 'reset') {
-            resetShiritoriGame(message.channel.id);
-            return message.reply('🔄 このチャンネルのしりとりをリセットしたよ。');
-        }
-        // 引数なし → このチャンネルをしりとり部屋にする
-        settings.shiritoriChannelId = message.channel.id;
-        saveShiritoriSettings(settings);
-        resetShiritoriGame(message.channel.id);
-        return message.reply('🎉 このチャンネルをしりとり部屋にしたよ！単語を送ってあそんでね（`!shiritori off` で無効、`!shiritori reset` でリセット）');
-    }
+    await each('onMessageEarly', message);
 
-    // しりとり進行（設定チャンネルのみ・shiritori.js 側で判定）
-    handleShiritoriMessage(message).catch((err) => console.error('[Shiritori]', err));
-
-    // カウントゲーム進行 + VC募集の「サーバー活動中」記録
-    vcRecruit.recordText();
-    countGame.handleCountMessage(message).catch((err) => console.error('[Count]', err));
-
-    // カウントゲーム設定（管理者のみ）
-    if (message.content.trim().startsWith('!count')) {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        const arg = message.content.trim().split(/\s+/)[1] || '';
-        if (arg === 'off') { countGame.disable(message.guild.id); return message.reply('🚫 カウントゲームを無効にしたよ。'); }
-        countGame.setChannel(message.guild.id, message.channel.id);
-        return message.reply('🔢 このチャンネルをカウント部屋にしたよ！ **1** から数えてね（同じ人の連続・数え間違いでリセット）。');
-    }
-
-    // VC募集設定（管理者のみ）
-    if (message.content.trim().startsWith('!vcrecruit')) {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        const parts = message.content.trim().split(/\s+/);
-        const arg = parts[1] || '';
-        if (arg === 'off') { vcRecruit.disable(); return message.reply('🚫 VC募集の自動投稿を無効にしたよ。'); }
-        if (arg === 'role') {
-            const role = message.mentions.roles.first();
-            if (!role) return message.reply('ロールをメンションしてね。例: `!vcrecruit role @通話勢`');
-            vcRecruit.setRole(role.id);
-            return message.reply(`📣 募集で呼びかけるロールを ${role} にしたよ。`);
-        }
-        if (arg === 'test') {
-            await vcRecruit.testPost(message.channel);
+    if (message.content.startsWith('!')) {
+        const { name, args } = parseCommand(message.content);
+        const cmd = commands.get(name);
+        if (cmd) {
+            if (cmd.admin && !isAdmin(message.member)) return;
+            try {
+                await cmd.run(message, args);
+            } catch (err) {
+                console.error(`[${cmd.feature}] ${name} failed:`, err);
+            }
             return;
         }
-        vcRecruit.setChannel(message.channel.id);
-        return message.reply('📣 このチャンネルをVC募集の投稿先にしたよ（VCが2時間無人＆サーバーが活動中のとき自動投稿）。呼びかけロールは `!vcrecruit role @ロール` で設定、テストは `!vcrecruit test`。');
     }
 
-    // 手動再認証コマンド（管理者のみ）
-    if (message.content.startsWith('!reauth')) {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-        const target = message.mentions.members?.first();
-        if (!target) {
-            return message.reply('対象ユーザーをメンションしてね。例: `!reauth @ユーザー`');
-        }
-
-        // 既存セッションがあればクリア
-        const existing = sessions.get(target.id);
-        if (existing) {
-            clearInterval(existing.timer);
-            try { await existing.thread.setArchived(true); } catch {}
-            sessions.delete(target.id);
-        }
-
-        await startAuth(target);
-        await message.reply(`${target} の再認証をはじめたよ 🔑`);
-        return;
-    }
-
-    // 認証パネル設置（管理者のみ）: 押すと呪文認証がはじまるボタンを置く
-    if (message.content.startsWith('!authpanel')) {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-        const desc = message.content.slice('!authpanel'.length).trim()
-            || 'したのボタンをおして、にゅうこくしんさ（おまじない認証）をはじめてね 🗝️';
-        const panel = new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setTitle('🌙 ネバーランドのとびら')
-            .setDescription(desc);
-        if (assetUrls.logo) panel.setThumbnail(assetUrls.logo);
-        if (assetUrls.bg) panel.setImage(assetUrls.bg);
-        const row = new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('start_auth').setLabel('認証する').setEmoji('🔑').setStyle(ButtonStyle.Primary),
-        );
-        await message.channel.send({ embeds: [panel], components: [row] });
-        await message.delete().catch(() => {});
-        return;
-    }
-
-    // 顔パスコマンド（管理者のみ）
-    if (message.content.startsWith('!vip')) {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-
-        const args = message.content.split(/\s+/);
-        const sub = args[1];
-
-        if (sub === 'list') {
-            if (whitelist.length === 0) return message.reply('顔パスリストは空だよ');
-            const mentions = whitelist.map(id => `<@${id}>`).join('\n');
-            return message.reply(`⭐ 顔パスリスト\n${mentions}`);
-        }
-
-        // メンションまたはIDからメンバー取得（サーバー外ユーザーも許容）
-        const targetId = message.mentions.members?.first()?.id ?? args[2]?.replace(/\D/g, '');
-        if (!targetId) {
-            return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
-        }
-        const target = message.guild.members.cache.get(targetId)
-            ?? await message.guild.members.fetch(targetId).catch(() => null);
-
-        if (sub === 'add') {
-            if (!whitelist.includes(targetId)) {
-                whitelist.push(targetId);
-                saveWhitelist(whitelist);
-            }
-            if (target) {
-                await target.roles.add(CONFIG.VIP_ROLE_ID).catch(() => {});
-                return message.reply(`${target} を顔パスリストに追加したよ ⭐`);
-            }
-            return message.reply(`ID \`${targetId}\` を顔パスリストに追加したよ ⭐（次回入室時にVIPロール付与）`);
-        }
-
-        if (sub === 'remove') {
-            whitelist = whitelist.filter(id => id !== targetId);
-            saveWhitelist(whitelist);
-            return message.reply(target ? `${target} を顔パスリストから外したよ` : `ID \`${targetId}\` を顔パスリストから外したよ`);
-        }
-
-        return message.reply('使い方: `!vip add @ユーザー or ID` / `!vip remove @ユーザー or ID` / `!vip list`');
-    }
-
-    // 入国審査一時停止コマンド（管理者のみ）
-    if (message.content.trim() === '!auth pause') {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        authPaused = true;
-        return message.reply('⏸️ 入国審査を一時停止したよ。この間に入国したユーザーは認証なしで入れるよ。解除は `!auth resume`');
-    }
-
-    if (message.content.trim() === '!auth resume') {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        authPaused = false;
-        return message.reply('▶️ 入国審査を再開したよ。');
-    }
-
-    if (message.content.trim() === '!auth status') {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        return message.reply(authPaused ? '⏸️ 入国審査は現在**一時停止中**だよ。' : '▶️ 入国審査は現在**稼働中**だよ。');
-    }
-
-    // ヘルプコマンド（管理者のみ）
-    if (message.content.trim() === '!help') {
-        if (!message.member?.permissions.has(PermissionFlagsBits.Administrator)) return;
-        return message.reply({ embeds: [new EmbedBuilder()
-            .setColor(0x5865F2)
-            .setTitle('📖 コマンド一覧')
-            .addFields(
-                { name: '`!reauth @ユーザー`', value: '手動で再認証を開始する' },
-                { name: '`!vip add @ユーザー`', value: '顔パスリストに追加＋認証ロール付与' },
-                { name: '`!vip remove @ユーザー`', value: '顔パスリストから削除' },
-                { name: '`!vip list`', value: '顔パスリストを表示' },
-                { name: '`!auth pause`', value: '入国審査を一時停止（この間の入国者は認証不要）' },
-                { name: '`!auth resume`', value: '入国審査を再開' },
-                { name: '`!auth status`', value: '入国審査の現在の状態を確認' },
-                { name: '`!shiritori`', value: 'このチャンネルをしりとり部屋にする（`off`で無効 / `reset`でリセット）' },
-                { name: '`!count`', value: 'このチャンネルをカウントゲーム部屋にする（`off`で無効）' },
-                { name: '`!vcrecruit`', value: 'VC募集の自動投稿先を設定（`role @X`/`test`/`off`）' },
-                { name: '`!help`', value: 'このヘルプを表示' },
-            )] });
-    }
-
-    // 認証メッセージ判定
-    const session = sessions.get(message.author.id);
-    if (!session || session.step !== 2) return;
-    if (message.channel.id !== session.thread.id) return;
-
-    const normalize = (s) => s
-        .trim()
-        .normalize('NFC')
-        .replace(/[​-‍﻿︀-️]/g, '')
-        .replace(/`/g, '')
-        .replace(/\s+/g, ' ');
-    if (normalize(message.content) === normalize(session.phrase)) {
-        await successAuth(message.member, session);
-    } else {
-        await failAuth(message.member, session, 'wrong');
-    }
+    await each('onMessage', message);
 });
 
 client.once('clientReady', async (c) => {
-    console.log(`${c.user.tag} きどうしたよ！`);
-    await initAssets(c).catch(console.error);
-    initShiritori();
-    vcRecruit.initVcRecruit(c);
+    console.log(`${c.user.tag} きどうしたよ！ 有効な機能: ${features.map((f) => f.name).join(', ')}`);
+    await each('onReady', c);
 });
 
 client.login(process.env.DISCORD_TOKEN);

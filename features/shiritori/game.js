@@ -1,7 +1,7 @@
-// shiritori.js — しりとりゲーム（kuromoji.jsでかな変換・辞書判定）
+// shiritori/game.js — しりとりゲーム（kuromoji.jsでかな変換・辞書判定）
 const { EmbedBuilder } = require('discord.js');
-const { getSettings, saveSettings } = require('./shiritori_settings');
-const { getTokenizer } = require('./japanese_tokenizer');
+const { getSettings, saveSettings } = require('./settings');
+const { getTokenizer } = require('./tokenizer');
 
 const HISTORY_LIMIT = 200;
 

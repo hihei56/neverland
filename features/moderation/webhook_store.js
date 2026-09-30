@@ -1,7 +1,8 @@
 const fs   = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('../../dataPath');
 
-const FILE = path.join(__dirname, 'data', 'webhooks.json');
+const FILE = path.join(DATA_DIR, 'webhooks.json');
 
 function load() {
     try {

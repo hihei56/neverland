@@ -1,7 +1,7 @@
-// count_game.js — カウントゲーム（指定チャンネルで 1,2,3... と数える。間違い/連続でリセット）
+// count/game.js — カウントゲーム（指定チャンネルで 1,2,3... と数える。間違い/連続でリセット）
 const path = require('path');
 const fs = require('fs');
-const { DATA_DIR } = require('./dataPath');
+const { DATA_DIR } = require('../../dataPath');
 
 const FILE = path.join(DATA_DIR, 'count_game.json');
 

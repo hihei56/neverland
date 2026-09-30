@@ -1,8 +1,8 @@
-// vc_recruit.js — VCが長時間無人のとき、募集ボタン付きメッセージを自動投稿する（簡略版）
+// vc_recruit/service.js — VCが長時間無人のとき、募集ボタン付きメッセージを自動投稿する（簡略版）
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType } = require('discord.js');
 const path = require('path');
 const fs = require('fs');
-const { DATA_DIR } = require('./dataPath');
+const { DATA_DIR } = require('../../dataPath');
 
 const FILE = path.join(DATA_DIR, 'vc_recruit.json');
 

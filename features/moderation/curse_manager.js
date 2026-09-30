@@ -1,7 +1,8 @@
 const fs   = require('fs');
 const path = require('path');
+const { DATA_DIR } = require('../../dataPath');
 
-const FILE = path.join(__dirname, 'data', 'cursed_users.json');
+const FILE = path.join(DATA_DIR, 'cursed_users.json');
 
 function load() {
     try {
