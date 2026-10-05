@@ -4,12 +4,14 @@
 //   name                      機能名（ログ用）
 //   enabled()                 false なら読み込まない（例: auth は ENABLE_AUTH=true のときだけ）
 //   commands                  { '!cmd': { admin: true, run(message, args) } }
+//   slashCommands             SlashCommandBuilder の配列（起動時に各サーバーへ登録）
 //   help                      !help に出す [{ name, value }]
 //   onReady(client)           起動時
 //   onMessageEarly(message)   コマンド判定より先に全メッセージで実行（モデレーション用）
 //   onMessage(message)        コマンド以外のメッセージで実行（ゲーム進行など）
 //   onInteraction(i)          自分が処理したら true を返す
 //   onMemberAdd(member) / onMemberRemove(member)
+//   onVoiceStateUpdate(oldState, newState)
 //
 // 新しい機能は features/<名前>/index.js を作って ALL_FEATURES に足す。
 
@@ -24,6 +26,7 @@ const ALL_FEATURES = [
     require('./features/shiritori'),
     require('./features/count'),
     require('./features/vc_recruit'),
+    require('./features/voice_panel'),
 ];
 
 const features = ALL_FEATURES.filter((f) => (f.enabled ? f.enabled() : true));
@@ -47,6 +50,21 @@ async function helpCommand(message) {
         .addFields(fields.slice(0, 25))] });
 }
 commands.set('!help', { feature: 'core', admin: true, run: helpCommand });
+
+/**
+ * スラッシュコマンドを参加中の全サーバーに登録する（サーバー単位なので即反映）。
+ * set() は全置き換えなので、このBotのコマンドは必ずここ（各機能の slashCommands）で定義すること。
+ */
+async function registerSlashCommands(c) {
+    const defs = features.flatMap((f) => f.slashCommands || []).map((b) => b.toJSON());
+    for (const guild of c.guilds.cache.values()) {
+        try {
+            await guild.commands.set(defs);
+        } catch (err) {
+            console.error(`[core] スラッシュコマンド登録失敗 (${guild.name}):`, err.message);
+        }
+    }
+}
 
 /** 各機能のハンドラを順に呼ぶ。1つが落ちても他は続行する。 */
 async function each(hook, ...args) {
@@ -73,6 +91,7 @@ const client = new Client({
 
 client.on('guildMemberAdd', (member) => each('onMemberAdd', member));
 client.on('guildMemberRemove', (member) => each('onMemberRemove', member));
+client.on('voiceStateUpdate', (oldState, newState) => each('onVoiceStateUpdate', oldState, newState));
 
 client.on('interactionCreate', async (interaction) => {
     for (const f of features) {
@@ -110,6 +129,7 @@ client.on('messageCreate', async (message) => {
 
 client.once('clientReady', async (c) => {
     console.log(`${c.user.tag} きどうしたよ！ 有効な機能: ${features.map((f) => f.name).join(', ')}`);
+    await registerSlashCommands(c);
     await each('onReady', c);
 });
 
