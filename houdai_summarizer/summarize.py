@@ -1,12 +1,7 @@
-"""放送大学の授業DVD/CDの音声を文字起こしして、Claudeで要約するスクリプト。
+"""放送大学の授業音声（CDから取り込んだファイル）を文字起こしして、Claudeで要約するスクリプト。
 
 使い方:
-    python summarize.py <入力> [<入力> ...] [-o 出力フォルダ]
-
-入力に指定できるもの:
-    - DVDのドライブ/フォルダ（VIDEO_TS を含むもの）または VIDEO_TS フォルダ
-    - 音声/動画ファイル（.wav .mp3 .m4a .flac .mp4 .mkv .vob など）
-    - 上記を含むフォルダ（中のファイルをまとめて処理）
+    python summarize.py <音声ファイルまたはフォルダ> [...] [-o 出力フォルダ]
 
 CDはそのままでは読めないので、先にWindows Media Playerなどで
 WAV/MP3に取り込んでから、そのファイルかフォルダを指定してください。
@@ -21,10 +16,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-MEDIA_EXTS = {
-    ".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wma",
-    ".mp4", ".mkv", ".mov", ".avi", ".wmv", ".vob", ".mpg", ".mpeg", ".ts",
-}
+AUDIO_EXTS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".wma"}
 
 SUMMARY_PROMPT = """以下は放送大学の授業の文字起こしです（音声認識なので誤変換を含みます）。
 受講生が授業を聞かずに内容を把握し、単位認定試験に備えられるように、次の形式の日本語Markdownでまとめてください。
@@ -56,74 +48,31 @@ def run_ffmpeg(args):
         raise RuntimeError(result.stderr.strip() or "ffmpeg failed")
 
 
-def find_video_ts(path: Path):
-    if path.name.upper() == "VIDEO_TS" and path.is_dir():
-        return path
-    for child in path.iterdir() if path.is_dir() else []:
-        if child.name.upper() == "VIDEO_TS" and child.is_dir():
-            return child
-    return None
-
-
-def dvd_titles(video_ts: Path):
-    """VIDEO_TS内のタイトルセットごとに、本編のVOB（VTS_xx_1.VOB以降）を集める。
-
-    VTS_xx_0.VOB はメニューなので除外する。1分未満のタイトルセットはメニュー等とみなして捨てる。
-    """
-    groups = {}
-    for vob in video_ts.iterdir():
-        m = re.fullmatch(r"VTS_(\d+)_(\d+)\.VOB", vob.name.upper())
-        if m and m.group(2) != "0":
-            groups.setdefault(m.group(1), []).append((int(m.group(2)), vob))
-    titles = []
-    for vts, parts in sorted(groups.items()):
-        files = [p for _, p in sorted(parts)]
-        if sum(f.stat().st_size for f in files) < 10 * 1024 * 1024:
-            continue
-        titles.append((f"{video_ts.parent.name or 'DVD'}_title{vts}", files))
-    return titles
-
-
 def collect_jobs(inputs):
-    """(名前, 入力ファイルのリスト) のリストを返す。"""
+    """(名前, 入力ファイル) のリストを返す。"""
     jobs = []
     for raw in inputs:
         path = Path(raw)
         if not path.exists():
             sys.exit(f"見つかりません: {path}")
-        video_ts = find_video_ts(path)
-        if video_ts:
-            jobs.extend(dvd_titles(video_ts))
-        elif path.is_dir():
+        if path.is_dir():
             for f in sorted(path.rglob("*")):
-                if f.suffix.lower() in MEDIA_EXTS and f.parent.name.upper() != "VIDEO_TS":
-                    jobs.append((f.stem, [f]))
+                if f.suffix.lower() in AUDIO_EXTS:
+                    jobs.append((f.stem, f))
         elif path.suffix.lower() == ".cda":
             sys.exit(".cda はCDの目次ファイルで音声ではありません。先にWAV/MP3へ取り込んでください。")
         else:
-            jobs.append((path.stem, [path]))
+            jobs.append((path.stem, path))
     return jobs
 
 
-def extract_audio(files, wav: Path):
+def extract_audio(src: Path, wav: Path):
     """16kHzモノラルWAVに変換する（Whisperの入力形式）。"""
-    if len(files) == 1:
-        src = str(files[0])
-    else:
-        # DVDのVOBは1GBごとに分割されているので連結して読む
-        src = "concat:" + "|".join(str(f) for f in files)
     try:
-        run_ffmpeg(["-i", src, "-vn", "-ac", "1", "-ar", "16000", str(wav)])
+        run_ffmpeg(["-i", str(src), "-vn", "-ac", "1", "-ar", "16000", str(wav)])
     except RuntimeError as e:
         wav.unlink(missing_ok=True)
-        raise RuntimeError(
-            f"音声を取り出せませんでした: {e}\n"
-            "DVDにコピーガード(CSS)がかかっていると読めません。"
-            "ガードの解除は私的使用でも違法なので、このスクリプトでは対応しません。"
-        ) from e
-    if wav.stat().st_size < 100 * 1024:
-        wav.unlink()
-        raise RuntimeError("取り出した音声がほぼ空です。コピーガードがかかっている可能性があります。")
+        raise RuntimeError(f"音声を読み込めませんでした: {e}") from e
 
 
 _whisper_model = None
@@ -175,8 +124,8 @@ def summarize(transcript: str, title: str, model: str) -> str:
 
 
 def main():
-    parser = argparse.ArgumentParser(description="放送大学の授業DVD/CDを文字起こし→要約する")
-    parser.add_argument("inputs", nargs="+", help="DVDドライブ/フォルダ、音声・動画ファイル、またはそれらを含むフォルダ")
+    parser = argparse.ArgumentParser(description="放送大学の授業音声を文字起こし→要約する")
+    parser.add_argument("inputs", nargs="+", help="音声ファイル、または音声ファイルを含むフォルダ")
     parser.add_argument("-o", "--out", default="output", help="出力フォルダ（既定: output）")
     parser.add_argument("--whisper-model", default="large-v3",
                         help="Whisperモデル。GPUが無く遅い場合は medium や small（既定: large-v3）")
@@ -196,7 +145,7 @@ def main():
     print(f"{len(jobs)} 件を処理します。")
 
     failed = []
-    for name, files in jobs:
+    for name, src in jobs:
         print(f"\n=== {name} ===")
         wav = out_dir / f"{name}.wav"
         txt = out_dir / f"{name}.transcript.txt"
@@ -205,7 +154,7 @@ def main():
             if not txt.exists():
                 if not wav.exists():
                     print("  音声を抽出中...")
-                    extract_audio(files, wav)
+                    extract_audio(src, wav)
                 transcribe(wav, txt, args.whisper_model)
                 wav.unlink()  # 文字起こしが済んだら大きいWAVは消す
             if not args.no_summary and not md.exists():
